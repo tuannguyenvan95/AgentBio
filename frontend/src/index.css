@@ -1,0 +1,34 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    background-color: #F1F5F9;
+    color: #0F172A;
+    font-family: 'Plus Jakarta Sans', Inter, -apple-system, sans-serif;
+  }
+}
+
+/* Precision Cleanroom Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #E2E8F0;
+}
+::-webkit-scrollbar-thumb {
+  background: #94A3B8;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #64748B;
+}
+
+/* Nucleotide Sequence Code Block Styling */
+.dna-code {
+  font-family: 'JetBrains Mono', monospace;
+  letter-spacing: 0.05em;
+  word-break: break-all;
+}
