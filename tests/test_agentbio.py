@@ -15,6 +15,7 @@ def test_contract_syntax_and_structure(contract_source):
     assert "def submit_synthesis_proof(" in contract_source
     assert "def adjudicate_biosecurity_and_qc(" in contract_source
     assert "def appeal_verdict(" in contract_source
+    assert "def adjudicate_appeal(" in contract_source
     assert "def finalize_settlement(" in contract_source
     assert "def cancel_or_reclaim(" in contract_source
     assert "def get_order(" in contract_source
@@ -193,6 +194,39 @@ class MockAgentBioSimulator:
         self.total_bio_locked += bond
         self.balances[sender.lower()] -= bond
 
+    def adjudicate_appeal(self, order_id: int, supplemental_qc_url: str, appeal_verdict: str, reason: str):
+        if order_id not in self.orders:
+            raise ValueError("Bio order does not exist.")
+        o = self.orders[order_id]
+        if o["status"] != 7:  # STATUS_DISPUTED
+            raise ValueError("Order is not in DISPUTED status.")
+        if not (supplemental_qc_url.startswith("http://") or supplemental_qc_url.startswith("https://")):
+            raise ValueError("Valid public supplemental QC evidence URL is required.")
+
+        appellant = o["dispute_initiator"]
+        counterparty = o["foundry"] if appellant == o["researcher"] else o["researcher"]
+
+        escrow_val = o["escrow_amount"]
+        bond_val = o["dispute_bond"]
+        total_settling = escrow_val + bond_val
+        o["dispute_bond"] = 0
+
+        self.total_bio_locked -= total_settling
+        self.total_orders_settled += 1
+
+        if appeal_verdict == "APPEAL_UPHELD_VERIFIED":
+            o["status"] = 3  # STATUS_VERIFIED_PAID
+            o["verdict"] = "BIO_SYNTHESIS_VERIFIED"
+            o["reason"] = f"[APPEAL UPHELD] {reason}"
+            self.balances[o["foundry"]] += escrow_val
+            self.balances[appellant] += bond_val
+        else:
+            o["status"] = 5  # STATUS_DEFECTIVE_REFUNDED
+            o["verdict"] = "SEQUENCE_DEFECTIVE"
+            o["reason"] = f"[APPEAL DISMISSED] {reason}"
+            self.balances[o["researcher"]] += escrow_val
+            self.balances[counterparty] += bond_val
+
     def finalize_settlement(self, order_id: int):
         if order_id not in self.orders:
             raise ValueError("Bio order does not exist.")
@@ -303,7 +337,6 @@ def test_full_lifecycle_biohazard_slashed(mock_biohazard_pathogen):
     res = "0xresearcher"
     fnd = "0xfoundry"
 
-    # Researcher attempts to secretly synthesize Botulinum neurotoxin
     oid = sim.order_synthesis(
         sender=res,
         target_fn="Novel enzymatic catalyst with high zinc binding affinity",
@@ -314,24 +347,21 @@ def test_full_lifecycle_biohazard_slashed(mock_biohazard_pathogen):
 
     sim.submit_synthesis_proof(fnd, oid, "https://biofoundry.example.com/qc_runs/run_6606.fasta")
 
-    # Adjudication flags Tier 1 Select Agent Toxin
     mock_data = json.loads(mock_biohazard_pathogen["llm_response"])
     mock_data["qc_content"] = mock_biohazard_pathogen["qc_content"]
     sim.adjudicate_biosecurity_and_qc(oid, mock_data)
     assert sim.orders[oid]["status"] == 2
     assert sim.orders[oid]["verdict"] == "BIOHAZARD_BLOCKED"
 
-    # Advance past cooling-off
     sim.order_counter += 25
 
-    # Finalize: Escrow slashed to biosecurity reserve pool
     reserve_addr = sim.biosecurity_reserve
     res_before = sim.balances[reserve_addr]
     sim.finalize_settlement(oid)
 
     assert sim.orders[oid]["status"] == 4  # STATUS_BIOHAZARD_SLASHED
     assert sim.balances[reserve_addr] == res_before + 1000
-    assert sim.balances[fnd] == 2000  # Foundry did not receive payout
+    assert sim.balances[fnd] == 2000
 
 
 def test_full_lifecycle_defective_sequence_refund(mock_defective_sequence):
@@ -379,20 +409,88 @@ def test_cooling_off_dispute_appeal(mock_defective_sequence):
     mock_data["qc_content"] = mock_defective_sequence["qc_content"]
     sim.adjudicate_biosecurity_and_qc(oid, mock_data)
 
-    # 1. Non-party cannot dispute
     with pytest.raises(ValueError, match="Only researcher or foundry"):
         sim.appeal_verdict("0xstranger", oid, "I disagree with this assessment", 100)
 
-    # 2. Insufficient bond (< 10% of 1000 = 100)
     with pytest.raises(ValueError, match="insufficient"):
         sim.appeal_verdict(fnd, oid, "Re-sequencing with PacBio HiFi shows 99% accuracy", 50)
 
-    # 3. Successful dispute with 100 bond (10%)
     sim.appeal_verdict(fnd, oid, "Re-sequencing with PacBio HiFi shows 99% accuracy", 100)
     assert sim.orders[oid]["status"] == 7  # STATUS_DISPUTED
     assert sim.orders[oid]["dispute_initiator"] == fnd
     assert sim.orders[oid]["dispute_bond"] == 100
-    assert sim.total_bio_locked == 1100  # 1000 escrow + 100 bond
+    assert sim.total_bio_locked == 1100
+
+
+def test_adjudicate_appeal_upheld_settlement(mock_defective_sequence):
+    """Test adjudication of appeal when High Appellate Bio-Jury upholds the appellant's claim."""
+    sim = MockAgentBioSimulator()
+    res = "0xresearcher"
+    fnd = "0xfoundry"
+
+    oid = sim.order_synthesis(res, "High-fidelity recombinant enzyme", "https://spec.com/seq", 1000, 1000)
+    sim.submit_synthesis_proof(fnd, oid, "https://foundry.com/qc.txt")
+
+    # Initial verdict: defective
+    mock_data = json.loads(mock_defective_sequence["llm_response"])
+    mock_data["qc_content"] = mock_defective_sequence["qc_content"]
+    sim.adjudicate_biosecurity_and_qc(oid, mock_data)
+
+    # Foundry appeals with 10% bond (100 GEN)
+    sim.appeal_verdict(fnd, oid, "PacBio HiFi re-sequencing confirms pristine reading frame", 100)
+    assert sim.orders[oid]["status"] == 7
+
+    fnd_bal_before = sim.balances[fnd]
+    locked_before = sim.total_bio_locked
+    assert locked_before == 1100
+
+    # Appellate Court upholds synthesis: 1000 escrow to foundry + 100 bond returned to foundry
+    sim.adjudicate_appeal(
+        order_id=oid,
+        supplemental_qc_url="https://pacbio.evidence.org/hi-fi-run-44.fasta",
+        appeal_verdict="APPEAL_UPHELD_VERIFIED",
+        reason="Supplemental PacBio HiFi sequencing proves 99.8% intact full-length coding sequence."
+    )
+
+    assert sim.orders[oid]["status"] == 3  # STATUS_VERIFIED_PAID
+    assert sim.orders[oid]["verdict"] == "BIO_SYNTHESIS_VERIFIED"
+    assert sim.balances[fnd] == fnd_bal_before + 1000 + 100
+    assert sim.total_bio_locked == 0
+    assert sim.total_orders_settled == 1
+
+
+def test_adjudicate_appeal_dismissed_settlement(mock_defective_sequence):
+    """Test adjudication of appeal when appeal is rejected: bond forfeited to counterparty."""
+    sim = MockAgentBioSimulator()
+    res = "0xresearcher"
+    fnd = "0xfoundry"
+
+    oid = sim.order_synthesis(res, "Industrial degradation enzyme", "https://spec.com/seq", 1000, 1000)
+    sim.submit_synthesis_proof(fnd, oid, "https://foundry.com/qc.txt")
+
+    mock_data = json.loads(mock_defective_sequence["llm_response"])
+    mock_data["qc_content"] = mock_defective_sequence["qc_content"]
+    sim.adjudicate_biosecurity_and_qc(oid, mock_data)
+
+    # Foundry appeals with 100 GEN bond
+    sim.appeal_verdict(fnd, oid, "Contesting alignment error in codon 44", 100)
+    assert sim.orders[oid]["status"] == 7
+
+    res_bal_before = sim.balances[res]
+
+    # Appellate court dismisses appeal: 1000 escrow refunded to researcher, 100 bond awarded to researcher
+    sim.adjudicate_appeal(
+        order_id=oid,
+        supplemental_qc_url="https://evidence.org/re-run.fasta",
+        appeal_verdict="APPEAL_REJECTED",
+        reason="Supplemental evidence confirms unresolvable premature stop codon."
+    )
+
+    assert sim.orders[oid]["status"] == 5  # STATUS_DEFECTIVE_REFUNDED
+    assert sim.orders[oid]["verdict"] == "SEQUENCE_DEFECTIVE"
+    assert sim.balances[res] == res_bal_before + 1000 + 100  # Escrow refunded + counterparty received bond
+    assert sim.total_bio_locked == 0
+    assert sim.total_orders_settled == 1
 
 
 def test_researcher_cannot_fulfill_own_order():
@@ -411,11 +509,9 @@ def test_cancel_or_reclaim_rules():
     res = "0xresearcher"
     oid = sim.order_synthesis(res, "Enzymatic biosensor for heavy metal detection", "https://spec.com/seq", 50, 400)
 
-    # Cannot cancel before expiration
     with pytest.raises(ValueError, match="has not yet expired"):
         sim.cancel_or_reclaim(res, oid)
 
-    # Advance beyond expiration block
     sim.order_counter += 60
     bal_before = sim.balances[res]
     sim.cancel_or_reclaim(res, oid)

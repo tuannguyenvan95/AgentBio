@@ -29,6 +29,7 @@ import { OrderSynthesisModal } from './components/OrderSynthesisModal';
 import { SubmitProofModal } from './components/SubmitProofModal';
 import { SequenceInspectorModal } from './components/SequenceInspectorModal';
 import { DisputeModal } from './components/DisputeModal';
+import { AppellateModal } from './components/AppellateModal';
 import { LiveQCStudioModal } from './components/LiveQCStudioModal';
 
 import {
@@ -44,6 +45,7 @@ import {
   submitSynthesisProofOnChain,
   adjudicateBiosecurityOnChain,
   appealVerdictOnChain,
+  adjudicateAppealOnChain,
   finalizeSettlementOnChain,
   cancelOrReclaimOnChain,
   BioOrderData,
@@ -81,6 +83,7 @@ export function App() {
   const [isProofModalOpen, setIsProofModalOpen] = useState(false);
   const [isInspectorModalOpen, setIsInspectorModalOpen] = useState(false);
   const [isDisputeModalOpen, setIsDisputeModalOpen] = useState(false);
+  const [isAppellateModalOpen, setIsAppellateModalOpen] = useState(false);
   const [isStudioModalOpen, setIsStudioModalOpen] = useState(false);
   const [activeModalOrder, setActiveModalOrder] = useState<BioOrderData | null>(null);
   const [isProcessingAction, setIsProcessingAction] = useState(false);
@@ -270,6 +273,30 @@ export function App() {
       text: `Appeal filed and 10% bond staked for Order #${orderId}! Tx: ${tx.slice(0, 10)}...`,
     });
     await loadData();
+  };
+
+  const handleAdjudicateAppeal = async (orderId: number, supplementalQcUrl: string) => {
+    if (!account) {
+      await connectWallet();
+      return;
+    }
+    try {
+      setIsProcessingAction(true);
+      const tx = await adjudicateAppealOnChain(contractAddress, account, orderId, supplementalQcUrl);
+      setStatusMessage({
+        type: 'success',
+        text: `Appellate tribunal consensus reached on Order #${orderId}! Funds disbursed. Tx: ${tx.slice(0, 10)}...`,
+      });
+      await loadData();
+    } catch (err: any) {
+      console.error('Adjudicate appeal error:', err);
+      setStatusMessage({
+        type: 'error',
+        text: err?.message || 'Appellate tribunal adjudication failed on Studionet.',
+      });
+    } finally {
+      setIsProcessingAction(false);
+    }
   };
 
   const handleFinalize = async (orderId: number) => {
@@ -479,6 +506,10 @@ export function App() {
                   setActiveModalOrder(ord);
                   setIsDisputeModalOpen(true);
                 }}
+                onOpenAppellate={(ord) => {
+                  setActiveModalOrder(ord);
+                  setIsAppellateModalOpen(true);
+                }}
                 onAdjudicate={handleAdjudicate}
                 onFinalize={handleFinalize}
                 onCancel={handleCancel}
@@ -579,6 +610,10 @@ export function App() {
                       setActiveModalOrder(ord);
                       setIsDisputeModalOpen(true);
                     }}
+                    onOpenAppellate={(ord) => {
+                      setActiveModalOrder(ord);
+                      setIsAppellateModalOpen(true);
+                    }}
                     onAdjudicate={handleAdjudicate}
                     onFinalize={handleFinalize}
                     onCancel={handleCancel}
@@ -626,6 +661,16 @@ export function App() {
         }}
         order={activeModalOrder}
         onSubmit={handleAppeal}
+      />
+
+      <AppellateModal
+        isOpen={isAppellateModalOpen}
+        onClose={() => {
+          setIsAppellateModalOpen(false);
+          setActiveModalOrder(null);
+        }}
+        order={activeModalOrder}
+        onSubmit={handleAdjudicateAppeal}
       />
 
       <LiveQCStudioModal

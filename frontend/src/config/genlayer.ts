@@ -382,6 +382,29 @@ export async function appealVerdictOnChain(
 }
 
 /**
+ * High Appellate Bio-Jury re-evaluates the contested order and settles funds cleanly
+ */
+export async function adjudicateAppealOnChain(
+  contractAddress: string,
+  userAddress: string,
+  orderId: number,
+  supplementalQcUrl: string
+): Promise<string> {
+  await ensureStudionet();
+  const client = getGenLayerClient(userAddress);
+
+  const txHash = await (client.writeContract as any)({
+    address: contractAddress as `0x${string}`,
+    functionName: 'adjudicate_appeal',
+    args: [orderId, supplementalQcUrl.trim()],
+    value: 0n,
+  });
+
+  await client.waitForTransactionReceipt({ hash: txHash });
+  return txHash;
+}
+
+/**
  * Finalize settlement after cooling-off window elapses uncontested
  */
 export async function finalizeSettlementOnChain(

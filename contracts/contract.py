@@ -93,9 +93,6 @@ class Contract(gl.Contract):
 
     @gl.public.write.payable
     def order_synthesis(self, target_protein_function: str, sequence_spec_url: str, duration_blocks: int) -> u64:
-        """
-        Bio-Researcher locks GEN synthesis payment and submits DNA design specification.
-        """
         self._ensure_reserve_initialized()
         bounty = bigint(gl.message.value)
         if bounty <= bigint(0):
@@ -146,9 +143,6 @@ class Contract(gl.Contract):
 
     @gl.public.write
     def submit_synthesis_proof(self, order_id: u64, qc_report_url: str) -> None:
-        """
-        DNA Foundry claims order and submits Sanger/NGS sequencing alignment QC report URL.
-        """
         self._ensure_reserve_initialized()
         if order_id not in self.orders:
             raise gl.UserError(f"Bio order {int(order_id)} does not exist.")
@@ -173,11 +167,6 @@ class Contract(gl.Contract):
 
     @gl.public.write
     def adjudicate_biosecurity_and_qc(self, order_id: u64) -> None:
-        """
-        On-chain AI Jury fetches QC sequencing report via gl.nondet.web.render,
-        evaluates biosecurity risks (dual-use toxins, select agents, lethal pathogens),
-        and verifies nucleotide alignment fidelity against specification.
-        """
         self._ensure_reserve_initialized()
         if order_id not in self.orders:
             raise gl.UserError(f"Bio order {int(order_id)} does not exist.")
@@ -319,11 +308,9 @@ Respond ONLY with valid JSON without markdown fences:
 
             mine = leader_fn()
 
-            # 1. Semantic Verdict Agreement
             if mine["verdict"] != leader["verdict"]:
                 return False
 
-            # 2. Enhanced Biosecurity Equivalence: Both must agree on safety classification & evidence hash
             if mine.get("is_biosecure") != leader.get("is_biosecure"):
                 return False
             if leader.get("evidence_hash") != mine.get("evidence_hash"):
@@ -353,16 +340,11 @@ Respond ONLY with valid JSON without markdown fences:
         self.order_counter = self.order_counter + u64(1)
         current_block = self._get_current_block()
 
-        # Enforce 24-block Cooling-Off Dispute Window before any fund disbursement
         o.status = STATUS_AWAITING_PAYOUT
         o.audit_completed_block = current_block
 
     @gl.public.write.payable
     def appeal_verdict(self, order_id: u64, dispute_reason: str) -> None:
-        """
-        Allows Researcher or Foundry to contest the initial verdict during the 24-block window.
-        Appellant MUST stake a 10% dispute bond to deter frivolous griefing.
-        """
         self._ensure_reserve_initialized()
         if order_id not in self.orders:
             raise gl.UserError(f"Bio order {int(order_id)} does not exist.")
@@ -398,14 +380,116 @@ Respond ONLY with valid JSON without markdown fences:
         o.dispute_bond = staked
         o.reason = f"[DISPUTE by {_addr_str(sender)[:8]}]: {clean_reason} | Prior assessment: {o.reason}"
 
-        # Strictly track deposited bond in locked compute pool
         self.total_bio_locked = self.total_bio_locked + staked
 
     @gl.public.write
+    def adjudicate_appeal(self, order_id: u64, supplemental_qc_url: str) -> None:
+        """
+        High Appellate Bio-Jury re-evaluates the contested order and settles funds cleanly.
+        """
+        self._ensure_reserve_initialized()
+        if order_id not in self.orders:
+            raise gl.UserError(f"Bio order {int(order_id)} does not exist.")
+
+        o = self.orders[order_id]
+        if o.status != STATUS_DISPUTED:
+            raise gl.UserError("Order is not in DISPUTED status.")
+
+        clean_url = str(supplemental_qc_url).strip()
+        if not clean_url.startswith("http://") and not clean_url.startswith("https://"):
+            raise gl.UserError("Valid public supplemental QC evidence URL is required.")
+
+        appellant = o.dispute_initiator
+        target_fn = o.target_protein_function
+
+        def leader_fn():
+            raw_supp = ""
+            try:
+                raw_supp = gl.nondet.web.render(clean_url, mode="text")
+            except Exception:
+                pass
+
+            if not raw_supp:
+                return {
+                    "canary": CANARY_TOKEN,
+                    "verdict": "APPEAL_REJECTED",
+                    "reason": "Supplemental evidence inaccessible.",
+                }
+
+            prompt = f"""You are the Supreme Appellate Biosecurity Court on GenLayer.
+Re-examine the contested synthetic biology order:
+<target_function>{target_fn}</target_function>
+<supplemental_qc>{raw_supp[:6500]}</supplemental_qc>
+
+Determine if the appeal proves verified biological delivery or upholds prior failure.
+Output 'APPEAL_UPHELD_VERIFIED' or 'APPEAL_REJECTED'.
+
+Respond ONLY with valid JSON:
+{{"canary": "{CANARY_TOKEN}", "verdict": "APPEAL_UPHELD_VERIFIED"|"APPEAL_REJECTED", "reason": "<rationale>"}}"""
+
+            res = gl.nondet.exec_prompt(prompt, response_format="json")
+            parsed = None
+            if isinstance(res, dict):
+                parsed = res
+            elif isinstance(res, str):
+                try:
+                    t = res.replace("```json", "").replace("```", "").strip()
+                    parsed = json.loads(t)
+                except Exception:
+                    pass
+
+            if not parsed or str(parsed.get("canary", "")) != CANARY_TOKEN:
+                return {"canary": CANARY_TOKEN, "verdict": "APPEAL_REJECTED", "reason": "Parse error in appeal."}
+
+            v_str = str(parsed.get("verdict", "APPEAL_REJECTED")).upper().strip()
+            return {
+                "canary": CANARY_TOKEN,
+                "verdict": v_str if v_str == "APPEAL_UPHELD_VERIFIED" else "APPEAL_REJECTED",
+                "reason": str(parsed.get("reason", "Appellate review concluded."))
+            }
+
+        def validator_fn(leader_res) -> bool:
+            if not isinstance(leader_res, gl.vm.Return):
+                return False
+            leader = leader_res.calldata
+            if not isinstance(leader, dict) or "verdict" not in leader:
+                return False
+            mine = leader_fn()
+            return mine["verdict"] == leader["verdict"]
+
+        appeal_res = gl.vm.run_nondet(leader_fn, validator_fn)
+        app_verdict = appeal_res["verdict"]
+        app_reason = appeal_res["reason"]
+
+        escrow_val = o.escrow_amount
+        bond_val = o.dispute_bond
+        total_settling = escrow_val + bond_val
+        o.dispute_bond = bigint(0)
+
+        self.total_bio_locked = self.total_bio_locked - total_settling
+        self.total_orders_settled = self.total_orders_settled + u32(1)
+
+        counterparty = o.foundry if _addr_str(appellant) == _addr_str(o.researcher) else o.researcher
+
+        if app_verdict == "APPEAL_UPHELD_VERIFIED":
+            o.status = STATUS_VERIFIED_PAID
+            o.verdict = "BIO_SYNTHESIS_VERIFIED"
+            o.reason = f"[APPEAL UPHELD] {app_reason}"
+            if escrow_val > bigint(0):
+                gl.get_contract_at(o.foundry).emit_transfer(value=u256(escrow_val))
+            if bond_val > bigint(0):
+                gl.get_contract_at(appellant).emit_transfer(value=u256(bond_val))
+        else:
+            o.status = STATUS_DEFECTIVE_REFUNDED
+            o.verdict = "SEQUENCE_DEFECTIVE"
+            o.reason = f"[APPEAL DISMISSED] {app_reason}"
+            if escrow_val > bigint(0):
+                gl.get_contract_at(o.researcher).emit_transfer(value=u256(escrow_val))
+            if bond_val > bigint(0):
+                gl.get_contract_at(counterparty).emit_transfer(value=u256(bond_val))
+
+    @gl.public.write
     def finalize_settlement(self, order_id: u64) -> None:
-        """
-        Finalizes escrow disbursement strictly AFTER the 24-block cooling-off window has elapsed uncontested.
-        """
         self._ensure_reserve_initialized()
         if order_id not in self.orders:
             raise gl.UserError(f"Bio order {int(order_id)} does not exist.")
@@ -431,21 +515,16 @@ Respond ONLY with valid JSON without markdown fences:
 
         elif o.verdict == "BIOHAZARD_BLOCKED":
             o.status = STATUS_BIOHAZARD_SLASHED
-            # Biosecurity penalty: Confiscate researcher's escrow to protocol reserve
             if escrow_val > bigint(0):
                 gl.get_contract_at(self.biosecurity_reserve).emit_transfer(value=u256(escrow_val))
 
         else:
             o.status = STATUS_DEFECTIVE_REFUNDED
-            # Sequence defective: 100% refund to researcher
             if escrow_val > bigint(0):
                 gl.get_contract_at(o.researcher).emit_transfer(value=u256(escrow_val))
 
     @gl.public.write
     def cancel_or_reclaim(self, order_id: u64) -> None:
-        """
-        Researcher can cancel an unclaimed bio order after expiration, or if foundry stalled.
-        """
         self._ensure_reserve_initialized()
         if order_id not in self.orders:
             raise gl.UserError(f"Bio order {int(order_id)} does not exist.")
@@ -480,7 +559,6 @@ Respond ONLY with valid JSON without markdown fences:
 
     @gl.public.view
     def get_order(self, order_id: u64) -> str:
-        """Returns JSON serialized representation of a bio order."""
         if order_id not in self.orders:
             raise gl.UserError(f"Bio order {int(order_id)} does not exist.")
 
@@ -519,7 +597,6 @@ Respond ONLY with valid JSON without markdown fences:
 
     @gl.public.view
     def get_all_orders(self) -> str:
-        """Returns JSON list of all bio orders for high-performance frontend hydration."""
         orders_list = []
         for oid in self.order_ids:
             if oid in self.orders:

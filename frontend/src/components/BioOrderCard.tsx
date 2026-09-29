@@ -10,7 +10,8 @@ import {
   ShieldAlert, 
   ShieldCheck, 
   Clock, 
-  Ban 
+  Ban,
+  Gavel 
 } from 'lucide-react';
 import { BioOrderData } from '../config/genlayer';
 import { formatGen, getStatusMeta, truncateAddress } from '../utils/helpers';
@@ -21,6 +22,7 @@ interface BioOrderCardProps {
   onOpenSubmitProof: (order: BioOrderData) => void;
   onOpenInspector: (order: BioOrderData) => void;
   onOpenDispute: (order: BioOrderData) => void;
+  onOpenAppellate: (order: BioOrderData) => void;
   onAdjudicate: (orderId: number) => Promise<void>;
   onFinalize: (orderId: number) => Promise<void>;
   onCancel: (orderId: number) => Promise<void>;
@@ -33,6 +35,7 @@ export const BioOrderCard: React.FC<BioOrderCardProps> = ({
   onOpenSubmitProof,
   onOpenInspector,
   onOpenDispute,
+  onOpenAppellate,
   onAdjudicate,
   onFinalize,
   onCancel,
@@ -223,6 +226,18 @@ export const BioOrderCard: React.FC<BioOrderCardProps> = ({
             <span className="text-[11px] font-bold text-amber-700 bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200">
               Refunded to Researcher
             </span>
+          )}
+
+          {/* Status 7: Disputed Appeal */}
+          {order.status === 7 && (
+            <button
+              onClick={() => onOpenAppellate(order)}
+              disabled={isProcessing}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-sm active:scale-95 disabled:opacity-50"
+            >
+              <Gavel className="w-3.5 h-3.5" />
+              <span>Appellate Jury</span>
+            </button>
           )}
         </div>
       </div>

@@ -21,7 +21,8 @@ import {
   Shield,
   Ban,
   FileSearch,
-  CheckCircle2
+  CheckCircle2,
+  Gavel
 } from 'lucide-react';
 import { BioOrderData } from '../config/genlayer';
 import { formatGen, getStatusMeta, truncateAddress } from '../utils/helpers';
@@ -32,6 +33,7 @@ interface GenomicInspectionCockpitProps {
   onOpenSubmitProof: (order: BioOrderData) => void;
   onOpenInspector: (order: BioOrderData) => void;
   onOpenDispute: (order: BioOrderData) => void;
+  onOpenAppellate: (order: BioOrderData) => void;
   onAdjudicate: (orderId: number) => Promise<void>;
   onFinalize: (orderId: number) => Promise<void>;
   onCancel: (orderId: number) => Promise<void>;
@@ -44,6 +46,7 @@ export const GenomicInspectionCockpit: React.FC<GenomicInspectionCockpitProps> =
   onOpenSubmitProof,
   onOpenInspector,
   onOpenDispute,
+  onOpenAppellate,
   onAdjudicate,
   onFinalize,
   onCancel,
@@ -471,6 +474,18 @@ export const GenomicInspectionCockpit: React.FC<GenomicInspectionCockpitProps> =
                 <span>Finalize Settlement</span>
               </button>
             </>
+          )}
+
+          {/* Status 7: Disputed Appeal */}
+          {order.status === 7 && (
+            <button
+              onClick={() => onOpenAppellate(order)}
+              disabled={isProcessing}
+              className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-md shadow-indigo-600/20 active:scale-95 transition-all disabled:opacity-50"
+            >
+              <Gavel className="w-4 h-4" />
+              <span>Convene Appellate Bio-Jury</span>
+            </button>
           )}
         </div>
       </div>
