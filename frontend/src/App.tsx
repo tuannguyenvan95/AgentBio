@@ -14,12 +14,17 @@ import {
   Cpu,
   Layers,
   Sparkles,
-  Microscope
+  Microscope,
+  LayoutGrid,
+  Columns3
 } from 'lucide-react';
 import { Navbar } from './components/Navbar';
+import { NucleotideRibbon } from './components/NucleotideRibbon';
 import { StatsBar } from './components/StatsBar';
 import { BioOrderCard } from './components/BioOrderCard';
-import { BioForensicWorkbench } from './components/BioForensicWorkbench';
+import { OrderMatrixSidebar } from './components/OrderMatrixSidebar';
+import { GenomicInspectionCockpit } from './components/GenomicInspectionCockpit';
+import { DeSciVaultSidebar } from './components/DeSciVaultSidebar';
 import { OrderSynthesisModal } from './components/OrderSynthesisModal';
 import { SubmitProofModal } from './components/SubmitProofModal';
 import { SequenceInspectorModal } from './components/SequenceInspectorModal';
@@ -62,7 +67,10 @@ export function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
-  const [workbenchOrder, setWorkbenchOrder] = useState<BioOrderData | null>(null);
+  const [selectedOrder, setSelectedOrder] = useState<BioOrderData | null>(null);
+
+  // Layout View Mode: 'cockpit' (Novel 3-Panel Biocomputing Console) vs 'grid' (Ledger Grid)
+  const [layoutMode, setLayoutMode] = useState<'cockpit' | 'grid'>('cockpit');
 
   // Filters & Search
   const [selectedFilter, setSelectedFilter] = useState<string>('all');
@@ -74,7 +82,7 @@ export function App() {
   const [isInspectorModalOpen, setIsInspectorModalOpen] = useState(false);
   const [isDisputeModalOpen, setIsDisputeModalOpen] = useState(false);
   const [isStudioModalOpen, setIsStudioModalOpen] = useState(false);
-  const [activeOrder, setActiveOrder] = useState<BioOrderData | null>(null);
+  const [activeModalOrder, setActiveModalOrder] = useState<BioOrderData | null>(null);
   const [isProcessingAction, setIsProcessingAction] = useState(false);
 
   // Connect Wallet
@@ -125,9 +133,9 @@ export function App() {
       setStats(statsData);
       setOrders(ordersData);
 
-      // Select first order for workbench if none active
+      // Maintain or initialize selected order for cockpit
       if (ordersData.length > 0) {
-        setWorkbenchOrder((prev) => {
+        setSelectedOrder((prev) => {
           if (!prev) return ordersData[0];
           const updated = ordersData.find((o) => o.order_id === prev.order_id);
           return updated || ordersData[0];
@@ -232,7 +240,7 @@ export function App() {
       setIsProcessingAction(true);
       setStatusMessage({
         type: 'info',
-        text: `Convening AI Biosecurity Jury for Order #${orderId}. Fetching live FASTA/QC and running LLM consensus...`,
+        text: `Convening AI Biosecurity Jury for Order #${orderId}. Digesting live FASTA/QC and executing consensus...`,
       });
       const tx = await adjudicateBiosecurityOnChain(contractAddress, account, orderId);
       setStatusMessage({
@@ -335,7 +343,7 @@ export function App() {
   });
 
   return (
-    <div className="min-h-screen bg-[#F1F5F9] text-[#0F172A] font-sans selection:bg-emerald-100 selection:text-emerald-800">
+    <div className="min-h-screen bg-[#F1F5F9] text-[#0F172A] font-sans selection:bg-emerald-100 selection:text-emerald-800 flex flex-col">
       
       {/* Precision Cleanroom Navbar */}
       <Navbar
@@ -349,13 +357,16 @@ export function App() {
         onSaveContractAddress={handleSaveContractAddress}
       />
 
-      {/* Main Cleanroom Surface */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      {/* Streaming Nucleotide Sequence Ribbon */}
+      <NucleotideRibbon />
+
+      {/* Main Surface */}
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
         
         {/* Status Toast Alert */}
         {statusMessage && (
           <div
-            className={`mb-6 p-4 rounded-2xl border text-xs font-semibold flex items-center justify-between shadow-sm animate-fadeIn ${
+            className={`mb-5 p-4 rounded-2xl border text-xs font-semibold flex items-center justify-between shadow-sm animate-fadeIn ${
               statusMessage.type === 'success'
                 ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
                 : statusMessage.type === 'error'
@@ -380,194 +391,202 @@ export function App() {
           </div>
         )}
 
-        {/* Hero Banner: Genomic Cleanroom & Biosecurity Protocol */}
-        <div className="bg-white rounded-3xl p-6 sm:p-8 border border-slate-200 shadow-sm mb-8 relative overflow-hidden">
-          <div className="absolute right-0 top-0 bottom-0 w-1/3 bg-gradient-to-l from-emerald-50/60 to-transparent pointer-events-none" />
-          <div className="max-w-3xl relative z-10">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold mb-3">
-              <span className="w-2 h-2 rounded-full bg-emerald-600 animate-pulse" />
-              <span>Decentralized Science (DeSci) & Synthetic Biosecurity</span>
+        {/* Layout Control Bar & Cleanroom Telemetry Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+              <h1 className="font-display font-extrabold text-xl sm:text-2xl text-slate-900 tracking-tight">
+                Genomic Cleanroom & Bio-Foundry Console
+              </h1>
             </div>
-
-            <h1 className="font-display text-2xl sm:text-3xl lg:text-4xl font-extrabold tracking-tight text-slate-900 leading-tight">
-              Autonomous Synthetic Biology Protocol & DNA Safety Escrow
-            </h1>
-
-            <p className="mt-3 text-sm text-slate-600 leading-relaxed">
-              Enabling decentralized AI agents and researchers to commission gene and protein synthesis with on-chain biosecurity screening. Escrow is released only when GenLayer AI juries verify sequence alignment fidelity (≥80%) and certify zero dual-use pathogen risk.
+            <p className="text-xs text-slate-500 mt-0.5">
+              Autonomous Synthetic Biology Protocol & DNA Sequence Safety Escrow • GenLayer Studionet #61999
             </p>
-
-            {/* Quick Action Chamber */}
-            <div className="mt-6 flex flex-wrap items-center gap-3">
-              <button
-                onClick={() => {
-                  if (!account) {
-                    connectWallet();
-                  } else {
-                    setIsOrderModalOpen(true);
-                  }
-                }}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-md shadow-emerald-600/20 transition-all active:scale-[0.98]"
-              >
-                <Plus className="w-4 h-4" />
-                <span>Commission DNA Synthesis</span>
-              </button>
-
-              <button
-                onClick={() => setIsStudioModalOpen(true)}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold shadow-md transition-all active:scale-[0.98]"
-              >
-                <Sparkles className="w-4 h-4 text-emerald-400" />
-                <span>Open QC Consensus Studio</span>
-              </button>
-
-              <a
-                href={STUDIO_URL}
-                target="_blank"
-                rel="noreferrer"
-                className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-xs font-semibold text-slate-700 transition-colors"
-              >
-                <span>GenLayer Studio Console</span>
-                <ExternalLink className="w-3.5 h-3.5" />
-              </a>
-            </div>
-          </div>
-        </div>
-
-        {/* Aggregated Cleanroom Metrics */}
-        <StatsBar stats={stats} orders={orders} />
-
-        {/* Interactive Forensic Workbench Section */}
-        <div className="mb-4 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Microscope className="w-5 h-5 text-emerald-600" />
-            <h2 className="font-display font-extrabold text-lg text-slate-900">
-              Forensic Sequence Alignment & Biosecurity Workbench
-            </h2>
-          </div>
-          <span className="text-xs text-slate-400 font-semibold hidden sm:inline">
-            Click any order card below to inspect in real-time
-          </span>
-        </div>
-
-        <BioForensicWorkbench
-          order={workbenchOrder}
-          currentUser={account}
-          onOpenSubmitProof={(ord) => {
-            setActiveOrder(ord);
-            setIsProofModalOpen(true);
-          }}
-          onOpenDispute={(ord) => {
-            setActiveOrder(ord);
-            setIsDisputeModalOpen(true);
-          }}
-          onAdjudicate={handleAdjudicate}
-          onFinalize={handleFinalize}
-          onCancel={handleCancel}
-          isProcessing={isProcessingAction}
-        />
-
-        {/* Filter & Search Bar */}
-        <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
-          
-          {/* Status Tabs */}
-          <div className="flex items-center gap-1 overflow-x-auto pb-1 md:pb-0 text-xs font-semibold">
-            {[
-              { id: 'all', label: 'All Orders' },
-              { id: 'open', label: 'Open' },
-              { id: 'synthesis', label: 'In Synthesis' },
-              { id: 'cooling', label: 'Cooling-Off' },
-              { id: 'verified', label: 'Verified' },
-              { id: 'blocked', label: 'Biohazard' },
-              { id: 'defective', label: 'Defective' },
-              { id: 'disputed', label: 'Disputed' },
-            ].map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => setSelectedFilter(tab.id)}
-                className={`px-3 py-1.5 rounded-xl whitespace-nowrap transition-all ${
-                  selectedFilter === tab.id
-                    ? 'bg-slate-900 text-white shadow-sm'
-                    : 'text-slate-600 hover:bg-slate-100'
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))}
           </div>
 
-          {/* Search Box */}
-          <div className="relative min-w-[240px]">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search protein function, ID, or address..."
-              className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-200 bg-slate-50 text-xs text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-500"
-            />
-          </div>
-        </div>
-
-        {/* Orders Grid Ledger */}
-        {isLoading ? (
-          <div className="bg-white rounded-3xl border border-slate-200 p-12 text-center">
-            <RefreshCw className="w-8 h-8 text-emerald-600 animate-spin mx-auto mb-3" />
-            <p className="text-xs font-bold text-slate-700">Connecting to GenLayer Studionet RPC...</p>
-            <p className="text-[11px] text-slate-400 mt-1">Hydrating synthesis ledger & biosecurity states</p>
-          </div>
-        ) : filteredOrders.length === 0 ? (
-          <div className="bg-white rounded-3xl border border-slate-200 p-12 text-center max-w-xl mx-auto">
-            <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto mb-3">
-              <Dna className="w-6 h-6" />
-            </div>
-            <h3 className="text-base font-bold text-slate-900">No Bio Orders Found</h3>
-            <p className="text-xs text-slate-500 mt-1 mb-5">
-              {searchQuery || selectedFilter !== 'all'
-                ? 'No synthesis orders match your current filter parameters.'
-                : 'No DNA synthesis escrows are currently active on this contract.'}
-            </p>
+          {/* Layout Mode Switcher */}
+          <div className="flex items-center gap-2 self-start sm:self-auto bg-white p-1 rounded-2xl border border-slate-200 shadow-xs">
             <button
-              onClick={() => setIsOrderModalOpen(true)}
-              className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-md shadow-emerald-600/20"
+              onClick={() => setLayoutMode('cockpit')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                layoutMode === 'cockpit'
+                  ? 'bg-slate-900 text-white shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+              }`}
             >
-              Commission First DNA Synthesis
+              <Columns3 className="w-3.5 h-3.5" />
+              <span>Cockpit Console</span>
+            </button>
+
+            <button
+              onClick={() => setLayoutMode('grid')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                layoutMode === 'grid'
+                  ? 'bg-slate-900 text-white shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+              }`}
+            >
+              <LayoutGrid className="w-3.5 h-3.5" />
+              <span>Matrix Ledger</span>
+            </button>
+
+            <button
+              onClick={() => setIsStudioModalOpen(true)}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-teal-50 text-teal-700 hover:bg-teal-100 border border-teal-200 text-xs font-bold transition-all ml-1"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>Simulator</span>
             </button>
           </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-            {filteredOrders.map((order) => (
-              <div
-                key={order.order_id}
-                onClick={() => setWorkbenchOrder(order)}
-                className={`cursor-pointer transition-all ${
-                  workbenchOrder?.order_id === order.order_id
-                    ? 'ring-2 ring-emerald-500 rounded-2xl'
-                    : ''
-                }`}
-              >
-                <BioOrderCard
-                  order={order}
-                  currentUser={account}
-                  onOpenSubmitProof={(ord) => {
-                    setActiveOrder(ord);
-                    setIsProofModalOpen(true);
-                  }}
-                  onOpenInspector={(ord) => {
-                    setActiveOrder(ord);
-                    setIsInspectorModalOpen(true);
-                  }}
-                  onOpenDispute={(ord) => {
-                    setActiveOrder(ord);
-                    setIsDisputeModalOpen(true);
-                  }}
-                  onAdjudicate={handleAdjudicate}
-                  onFinalize={handleFinalize}
-                  onCancel={handleCancel}
-                  isProcessing={isProcessingAction}
-                />
+        </div>
+
+        {/* ── MODE 1: NOVEL 3-PANEL COCKPIT CONSOLE ────────────────── */}
+        {layoutMode === 'cockpit' && (
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+            
+            {/* Left Column: Order Matrix Sidebar (3 Cols) */}
+            <div className="lg:col-span-3">
+              <OrderMatrixSidebar
+                orders={filteredOrders}
+                selectedOrderId={selectedOrder?.order_id || null}
+                onSelectOrder={(ord) => setSelectedOrder(ord)}
+                onOpenCommission={() => {
+                  if (!account) connectWallet();
+                  else setIsOrderModalOpen(true);
+                }}
+                selectedFilter={selectedFilter}
+                onFilterChange={setSelectedFilter}
+                searchQuery={searchQuery}
+                onSearchChange={setSearchQuery}
+              />
+            </div>
+
+            {/* Center Column: Genomic Inspection Cockpit (6 Cols) */}
+            <div className="lg:col-span-6">
+              <GenomicInspectionCockpit
+                order={selectedOrder}
+                currentUser={account}
+                onOpenSubmitProof={(ord) => {
+                  setActiveModalOrder(ord);
+                  setIsProofModalOpen(true);
+                }}
+                onOpenInspector={(ord) => {
+                  setActiveModalOrder(ord);
+                  setIsInspectorModalOpen(true);
+                }}
+                onOpenDispute={(ord) => {
+                  setActiveModalOrder(ord);
+                  setIsDisputeModalOpen(true);
+                }}
+                onAdjudicate={handleAdjudicate}
+                onFinalize={handleFinalize}
+                onCancel={handleCancel}
+                isProcessing={isProcessingAction}
+              />
+            </div>
+
+            {/* Right Column: DeSci Protocol Vault Sidebar (3 Cols) */}
+            <div className="lg:col-span-3">
+              <DeSciVaultSidebar
+                stats={stats}
+                orders={orders}
+                onOpenStudio={() => setIsStudioModalOpen(true)}
+                onOpenCommission={() => {
+                  if (!account) connectWallet();
+                  else setIsOrderModalOpen(true);
+                }}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* ── MODE 2: MATRIX LEDGER GRID VIEW ──────────────────────── */}
+        {layoutMode === 'grid' && (
+          <div className="space-y-6">
+            <StatsBar stats={stats} orders={orders} />
+
+            {/* Filter Tabs in Grid Mode */}
+            <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="flex items-center gap-1 overflow-x-auto text-xs font-semibold">
+                {[
+                  { id: 'all', label: 'All Orders' },
+                  { id: 'open', label: 'Open' },
+                  { id: 'synthesis', label: 'In Synthesis' },
+                  { id: 'cooling', label: 'Cooling-Off' },
+                  { id: 'verified', label: 'Verified' },
+                  { id: 'blocked', label: 'Biohazard' },
+                  { id: 'defective', label: 'Defective' },
+                ].map((tab) => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setSelectedFilter(tab.id)}
+                    className={`px-3 py-1.5 rounded-xl whitespace-nowrap transition-all ${
+                      selectedFilter === tab.id
+                        ? 'bg-slate-900 text-white shadow-xs'
+                        : 'text-slate-600 hover:bg-slate-100'
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
               </div>
-            ))}
+
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search orders..."
+                  className="px-3.5 py-1.5 rounded-xl border border-slate-200 bg-slate-50 text-xs text-slate-800"
+                />
+                <button
+                  onClick={() => {
+                    if (!account) connectWallet();
+                    else setIsOrderModalOpen(true);
+                  }}
+                  className="flex items-center gap-1 px-4 py-1.5 rounded-xl bg-emerald-600 text-white text-xs font-bold shadow-sm"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Commission</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Grid Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+              {filteredOrders.map((order) => (
+                <div
+                  key={order.order_id}
+                  onClick={() => {
+                    setSelectedOrder(order);
+                    setLayoutMode('cockpit');
+                  }}
+                  className="cursor-pointer"
+                >
+                  <BioOrderCard
+                    order={order}
+                    currentUser={account}
+                    onOpenSubmitProof={(ord) => {
+                      setActiveModalOrder(ord);
+                      setIsProofModalOpen(true);
+                    }}
+                    onOpenInspector={(ord) => {
+                      setActiveModalOrder(ord);
+                      setIsInspectorModalOpen(true);
+                    }}
+                    onOpenDispute={(ord) => {
+                      setActiveModalOrder(ord);
+                      setIsDisputeModalOpen(true);
+                    }}
+                    onAdjudicate={handleAdjudicate}
+                    onFinalize={handleFinalize}
+                    onCancel={handleCancel}
+                    isProcessing={isProcessingAction}
+                  />
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </main>
@@ -584,9 +603,9 @@ export function App() {
         isOpen={isProofModalOpen}
         onClose={() => {
           setIsProofModalOpen(false);
-          setActiveOrder(null);
+          setActiveModalOrder(null);
         }}
-        order={activeOrder}
+        order={activeModalOrder}
         onSubmit={handleSubmitProof}
       />
 
@@ -594,18 +613,18 @@ export function App() {
         isOpen={isInspectorModalOpen}
         onClose={() => {
           setIsInspectorModalOpen(false);
-          setActiveOrder(null);
+          setActiveModalOrder(null);
         }}
-        order={activeOrder}
+        order={activeModalOrder}
       />
 
       <DisputeModal
         isOpen={isDisputeModalOpen}
         onClose={() => {
           setIsDisputeModalOpen(false);
-          setActiveOrder(null);
+          setActiveModalOrder(null);
         }}
-        order={activeOrder}
+        order={activeModalOrder}
         onSubmit={handleAppeal}
       />
 
