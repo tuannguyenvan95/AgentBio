@@ -4,6 +4,15 @@ from dataclasses import dataclass
 import json
 import hashlib
 
+class UserError(Exception):
+    pass
+
+try:
+    if not hasattr(gl, "UserError"):
+        gl.UserError = UserError
+except Exception:
+    pass
+
 CANARY_TOKEN = "CANARY_AGENT_BIO_SAFETY_V1"
 ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 
