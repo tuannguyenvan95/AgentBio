@@ -5,7 +5,7 @@ import time
 from genlayer_py import create_client, create_account, studionet
 
 PK = "0x1b807b1df022a40f872596b11565e6b6856547dc66996bd3d5a85b376ea3a0ef"
-CONTRACT = "0xD89bF46b5Ac5f096288647EB8FcaE12F6C7B7f16"
+CONTRACT = "0xBF72c8b8b761BA05a0de8FF012658EF3956B49D6"
 
 
 def main():
