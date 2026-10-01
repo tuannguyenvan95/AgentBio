@@ -8,7 +8,7 @@ export const STUDIONET_RPC_URL = 'https://studio.genlayer.com/api';
 export const STUDIO_URL = 'https://studio.genlayer.com';
 
 // Default deployed contract address (updated via UI or localStorage)
-export const DEFAULT_CONTRACT_ADDRESS = '0xBF72c8b8b761BA05a0de8FF012658EF3956B49D6';
+export const DEFAULT_CONTRACT_ADDRESS = '0x4c9a39c9D6355718bB46a49aDa9C129Ce05bE6F9';
 
 export function getSavedContractAddress(): string {
   if (typeof window !== 'undefined') {
@@ -18,7 +18,8 @@ export function getSavedContractAddress(): string {
         stored &&
         stored.trim().startsWith('0x') &&
         stored.trim() !== '0xD89bF46b5Ac5f096288647EB8FcaE12F6C7B7f16' &&
-        stored.trim() !== '0x567A9F625931Da69fd662a8a0F7ad4FF8276fb7D'
+        stored.trim() !== '0x567A9F625931Da69fd662a8a0F7ad4FF8276fb7D' &&
+        stored.trim() !== '0xBF72c8b8b761BA05a0de8FF012658EF3956B49D6'
       ) {
         return stored.trim();
       }
@@ -86,13 +87,19 @@ export interface BioOrderData {
   dispute_bond?: string;
   target_protein_function: string;
   sequence_spec_url: string;
+  spec_evidence_hash?: string;
   qc_report_url: string;
+  qc_evidence_hash?: string;
   evidence_hash?: string;
   status: number; // 0..7
   verdict: string;
   reason: string;
   confidence: number;
   fidelity_score: number;
+  created_at?: string;
+  expires_at?: string;
+  audit_completed_at?: string;
+  cooling_off_seconds?: string;
   created_at_block?: string;
   expires_at_block?: string;
   audit_completed_block?: string;
@@ -102,6 +109,7 @@ export interface ProtocolStats {
   total_orders: number;
   total_bio_locked: string;
   total_orders_settled: number;
+  owner?: string;
   biosecurity_reserve?: string;
 }
 

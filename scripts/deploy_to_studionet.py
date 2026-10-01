@@ -28,8 +28,9 @@ def main():
 
     print("[*] Waiting for transaction receipt...", flush=True)
     receipt = client.wait_for_transaction_receipt(tx_hash)
-    print(f"[+] Receipt status   : {receipt.get('status')}", flush=True)
     contract_address = receipt.get("contract_address")
+    if not contract_address and receipt.get("to"):
+        contract_address = receipt.get("to")
     print(f"[+] DEPLOYED ADDRESS : {contract_address}", flush=True)
 
     if contract_address:

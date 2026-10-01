@@ -366,15 +366,17 @@ export const GenomicInspectionCockpit: React.FC<GenomicInspectionCockpitProps> =
           </p>
         </div>
 
-        {/* Cooling-off 24-Block Dispute Window Progress Bar (if in status 2) */}
+        {/* Cooling-off Dispute Window (if in status 2) */}
         {order.status === 2 && (
           <div className="p-4 rounded-2xl bg-blue-50/70 border border-blue-200 space-y-2 text-xs">
             <div className="flex items-center justify-between font-bold text-blue-900">
               <span className="flex items-center gap-1.5">
                 <Clock className="w-4 h-4 text-blue-600 animate-spin" />
-                <span>24-Block Cooling-Off Dispute Window Active</span>
+                <span>Dispute Cooling-Off Window Active (Timelock)</span>
               </span>
-              <span className="font-mono text-[11px]">Audit Block + 24</span>
+              <span className="font-mono text-[11px] bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full">
+                {order.cooling_off_seconds ? `${Math.round(Number(order.cooling_off_seconds) / 60)}m Timelock` : '24 Blocks'}
+              </span>
             </div>
             <p className="text-[11px] text-blue-800 leading-relaxed">
               Either researcher or foundry may appeal this verdict by staking a 10% dispute bond. Escrow cannot be disbursed until this timelock expires uncontested.
@@ -385,23 +387,38 @@ export const GenomicInspectionCockpit: React.FC<GenomicInspectionCockpitProps> =
           </div>
         )}
 
-        {/* Evidence Hash Snapshot */}
-        {order.evidence_hash && (
-          <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between gap-2 text-xs">
-            <div className="flex items-center gap-2 overflow-hidden">
-              <Hash className="w-4 h-4 text-slate-400 shrink-0" />
-              <div className="truncate">
-                <span className="text-[9px] uppercase font-bold text-slate-400 block">Immutable Evidence SHA-256</span>
-                <span className="font-mono text-[11px] text-slate-700 truncate block">{order.evidence_hash}</span>
+        {/* Bidirectional Authenticated Evidence Hashes */}
+        {(order.spec_evidence_hash || order.evidence_hash) && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+            {order.spec_evidence_hash && (
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 overflow-hidden">
+                  <Hash className="w-4 h-4 text-indigo-500 shrink-0" />
+                  <div className="truncate">
+                    <span className="text-[9px] uppercase font-bold text-indigo-600 block">Target Design Spec SHA-256</span>
+                    <span className="font-mono text-[10px] text-slate-700 truncate block">{order.spec_evidence_hash}</span>
+                  </div>
+                </div>
               </div>
-            </div>
-            <button
-              onClick={handleCopyHash}
-              className="p-1.5 rounded-lg bg-white border border-slate-200 text-slate-600 hover:text-slate-900 shrink-0"
-              title="Copy hash"
-            >
-              {copiedHash ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
-            </button>
+            )}
+            {(order.qc_evidence_hash || order.evidence_hash) && (
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 overflow-hidden">
+                  <Hash className="w-4 h-4 text-emerald-500 shrink-0" />
+                  <div className="truncate">
+                    <span className="text-[9px] uppercase font-bold text-emerald-600 block">Delivered QC Report SHA-256</span>
+                    <span className="font-mono text-[10px] text-slate-700 truncate block">{order.qc_evidence_hash || order.evidence_hash}</span>
+                  </div>
+                </div>
+                <button
+                  onClick={handleCopyHash}
+                  className="p-1.5 rounded-lg bg-white border border-slate-200 text-slate-600 hover:text-slate-900 shrink-0"
+                  title="Copy QC hash"
+                >
+                  {copiedHash ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>
