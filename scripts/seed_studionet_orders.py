@@ -5,7 +5,7 @@ import time
 from genlayer_py import create_client, create_account, studionet
 
 PK = "0x1b807b1df022a40f872596b11565e6b6856547dc66996bd3d5a85b376ea3a0ef"
-CONTRACT = "0x4c9a39c9D6355718bB46a49aDa9C129Ce05bE6F9"
+CONTRACT = "0xd2F4c421a5365FA80e87d6b4E4b078792289694D"
 
 def main():
     print("=" * 70, flush=True)
@@ -24,11 +24,11 @@ def main():
     tx1 = client.write_contract(
         address=CONTRACT,
         function_name="order_synthesis",
-        value=int(1.5 * 1e18),
+        value=int(0.1 * 1e18),
         args=[
             "High-fidelity CRISPR-Cas9 ribonucleoprotein guide RNA targeting BCL11A erythroid enhancer for sickle cell therapy",
             "https://raw.githubusercontent.com/tuannguyenvan95/AgentBio/main/data/cas9_bcl11a.fasta",
-            5000
+            86400 * 7
         ]
     )
     print(f"[+] Tx1 submitted: {tx1}", flush=True)
@@ -40,11 +40,11 @@ def main():
     tx2 = client.write_contract(
         address=CONTRACT,
         function_name="order_synthesis",
-        value=int(2.0 * 1e18),
+        value=int(0.15 * 1e18),
         args=[
             "Monoclonal antibody IgG1 heavy chain targeting IL-6 cytokine receptor for cytokine storm suppression in ARDS",
             "https://raw.githubusercontent.com/tuannguyenvan95/AgentBio/main/data/anti_il6_receptor.fasta",
-            5000
+            86400 * 7
         ]
     )
     print(f"[+] Tx2 submitted: {tx2}", flush=True)

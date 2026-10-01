@@ -1,6 +1,6 @@
 {
+  "contract_address": "0xd2F4c421a5365FA80e87d6b4E4b078792289694D",
+  "tx_hash": "0xe31a2fbe9a05bf1cbced43f0458b1ba6ccb225e4d2adfd34ec28445f3af08e56",
   "network": "studionet",
-  "chainId": 61999,
-  "rpcUrl": "https://studio.genlayer.com/api",
-  "contractAddress": "0x4c9a39c9D6355718bB46a49aDa9C129Ce05bE6F9"
+  "chainId": 61999
 }

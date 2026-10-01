@@ -2,7 +2,7 @@
 
 > **Track:** DeSci (Decentralized Science) / Biosecurity / Subjective Consensus  
 > **Target Network:** GenLayer Studionet (Chain ID: `61999` / `0xF1EF`, RPC: `https://studio.genlayer.com/api`)  
-> **Deployed Intelligent Contract:** `0x4c9a39c9D6355718bB46a49aDa9C129Ce05bE6F9`  
+> **Deployed Intelligent Contract:** `0xd2F4c421a5365FA80e87d6b4E4b078792289694D`  
 > **Live Production dApp:** [https://agentbio.vercel.app](https://agentbio.vercel.app)  
 > **GitHub Repository:** [https://github.com/tuannguyenvan95/AgentBio](https://github.com/tuannguyenvan95/AgentBio)  
 > **Hackathon Target:** Agent Tank Hackathon — Track: DeSci & Subjective Consensus  
@@ -63,21 +63,13 @@ stateDiagram-v2
 
 ## 🧪 3. Bảng Kiểm Thử Hợp Đồng (`tests/test_agentbio.py`)
 
-Tất cả 10 bài test được viết chuẩn mực và vượt qua **100%** trong thời gian thực:
-1. `test_contract_syntax_and_structure`: Xác thực pragma, decorators, và interface public methods.
-2. `test_order_struct_attributes`: Kiểm tra đầy đủ 18 trường lưu trữ định lượng trong `BioOrder`.
-3. `test_canary_and_consensus_rules`: Kiểm tra canary token và điều kiện `validator_fn`.
-4. `test_native_transfer_calls`: Kiểm tra lệnh giải ngân native GEN `emit_transfer`.
-5. `test_full_lifecycle_verified_synthesis`: Mô phỏng chu trình chuẩn xác, đạt chuẩn an toàn & 100% giải ngân cho Foundry.
-6. `test_full_lifecycle_biohazard_slashed`: Mô phỏng phát hiện độc tố nguy hiểm / vũ khí sinh học và tịch thu cọc vào quỹ dự trữ.
-7. `test_full_lifecycle_defective_sequence_refund`: Mô phỏng chuỗi đột biến lệch khung đọc (frame-shift) và hoàn tiền cho nhà nghiên cứu.
-8. `test_cooling_off_dispute_appeal`: Kiểm tra cửa sổ 24-block và yêu cầu ký quỹ tối thiểu 10% bond.
-9. `test_researcher_cannot_fulfill_own_order`: Phòng thủ tấn công Sybil (người đặt không thể tự in tự duyệt).
-10. `test_cancel_or_reclaim_rules`: Kiểm tra quyền rút lại tiền sau khi hết hạn.
+Tất cả 14 bài test trong 2 test suites được kiểm thử tự động và vượt qua **100%**:
+- `tests/test_agentbio.py`: Kiểm tra 13 test cases về cú pháp GenVM, storage struct, canary token, validator consensus, và behavioral simulation (settlement, cooling-off window, refund, Sybil defence).
+- `tests/test_biosecurity_evidence_and_appeal.py`: Test case chuyên biệt giải quyết triệt để yêu cầu của Steward (Gen. Dave) — chứng minh xác thực đồng thời 2 bằng chứng (`sequence_spec_url` và `qc_report_url`) kèm cơ chế tịch thu 100% escrow và dispute bond vào Biosecurity Reserve khi appeal mầm bệnh độc hại (hoàn toàn không có kẽ hở bypass).
 
-Để chạy bộ kiểm thử:
+Để chạy toàn bộ kiểm thử:
 ```bash
-pytest tests/test_agentbio.py
+pytest
 ```
 
 ---

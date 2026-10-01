@@ -4,14 +4,6 @@ from dataclasses import dataclass
 import json
 import hashlib
 
-class UserError(Exception):
-    pass
-
-try:
-    if not hasattr(gl, "UserError"):
-        gl.UserError = UserError
-except Exception:
-    pass
 
 CANARY_TOKEN = "CANARY_AGENT_BIO_SAFETY_V1"
 ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
@@ -45,7 +37,7 @@ def _get_sender() -> Address:
         try:
             return gl.message.sender
         except Exception:
-            raise UserError("Cannot resolve sender address.")
+            raise gl.UserError("Cannot resolve sender address.")
 
 
 @allow_storage
@@ -92,31 +84,41 @@ class Contract(gl.Contract):
     biosecurity_reserve: Address   # Protocol pool receiving confiscated biohazard fines
 
     def __init__(self):
-        deployer = _get_sender()
-        self.owner = deployer
-        self.biosecurity_reserve = deployer
+        # GenVM auto-initializes TreeMap and DynArray.
+        self.owner = Address(ZERO_ADDRESS)
+        self.biosecurity_reserve = Address(ZERO_ADDRESS)
         self.total_bio_locked = bigint(0)
         self.total_orders_settled = u32(0)
         self.order_counter = u64(0)
+
+    def _ensure_initialized(self) -> None:
+        """Lazily initialize owner and biosecurity reserve to the first caller if zero address."""
+        sender = _get_sender()
+        if _addr_str(self.owner) == ZERO_ADDRESS:
+            self.owner = sender
+        if _addr_str(self.biosecurity_reserve) == ZERO_ADDRESS:
+            self.biosecurity_reserve = sender
 
     # ── Protocol Governance & Reserve Ownership ───────────────────────
 
     @gl.public.write
     def set_biosecurity_reserve(self, new_reserve: Address) -> None:
         """Securely reassign protocol biosecurity reserve receiver (restricted to owner)."""
+        self._ensure_initialized()
         if _addr_str(_get_sender()) != _addr_str(self.owner):
-            raise UserError("Only protocol owner can update biosecurity reserve.")
+            raise gl.UserError("Only protocol owner can update biosecurity reserve.")
         if _addr_str(new_reserve) == ZERO_ADDRESS:
-            raise UserError("Invalid reserve address.")
+            raise gl.UserError("Invalid reserve address.")
         self.biosecurity_reserve = new_reserve
 
     @gl.public.write
     def transfer_ownership(self, new_owner: Address) -> None:
         """Transfer administrative ownership of the AgentBio protocol."""
+        self._ensure_initialized()
         if _addr_str(_get_sender()) != _addr_str(self.owner):
-            raise UserError("Only protocol owner can transfer ownership.")
+            raise gl.UserError("Only protocol owner can transfer ownership.")
         if _addr_str(new_owner) == ZERO_ADDRESS:
-            raise UserError("Invalid new owner address.")
+            raise gl.UserError("Invalid new owner address.")
         self.owner = new_owner
 
     # ── Real Timing Utilities ─────────────────────────────────────────
@@ -159,17 +161,18 @@ class Contract(gl.Contract):
     @gl.public.write.payable
     def order_synthesis(self, target_protein_function: str, sequence_spec_url: str, duration_seconds: int) -> u64:
         """Bio-Researcher commissions a DNA/RNA synthesis escrow with authenticated target design."""
+        self._ensure_initialized()
         bounty = bigint(gl.message.value)
         if bounty <= bigint(0):
-            raise UserError("DNA synthesis escrow deposit must be greater than 0 GEN.")
+            raise gl.UserError("DNA synthesis escrow deposit must be greater than 0 GEN.")
 
         clean_fn = str(target_protein_function).strip()
         if not clean_fn or len(clean_fn) < 10:
-            raise UserError("Target biological function description must be at least 10 characters.")
+            raise gl.UserError("Target biological function description must be at least 10 characters.")
 
         clean_spec = str(sequence_spec_url).strip()
         if not clean_spec.startswith("http://") and not clean_spec.startswith("https://"):
-            raise UserError("Valid public FASTA/GenBank sequence specification URL (http/https) is required.")
+            raise gl.UserError("Valid public FASTA/GenBank sequence specification URL (http/https) is required.")
 
         now = self._get_current_timestamp()
         dur = bigint(duration_seconds if duration_seconds > 0 else 604800)
@@ -217,20 +220,21 @@ class Contract(gl.Contract):
     @gl.public.write
     def submit_synthesis_proof(self, order_id: u64, qc_report_url: str) -> None:
         """DNA Foundry claims an open order and submits delivery sequencing QC proof."""
+        self._ensure_initialized()
         if order_id not in self.orders:
-            raise UserError(f"Bio order {int(order_id)} does not exist.")
+            raise gl.UserError(f"Bio order {int(order_id)} does not exist.")
 
         o = self.orders[order_id]
         if o.status != STATUS_ORDER_OPEN:
-            raise UserError("Bio order is not open for submission.")
+            raise gl.UserError("Bio order is not open for submission.")
 
         sender = _get_sender()
         if _addr_str(sender) == _addr_str(o.researcher):
-            raise UserError("Researcher cannot fulfill and synthesize their own bio order.")
+            raise gl.UserError("Researcher cannot fulfill and synthesize their own bio order.")
 
         clean_url = str(qc_report_url).strip()
         if not clean_url.startswith("http://") and not clean_url.startswith("https://"):
-            raise UserError("Valid public sequencing QC report URL (http/https) is required.")
+            raise gl.UserError("Valid public sequencing QC report URL (http/https) is required.")
 
         self.order_counter = self.order_counter + u64(1)
         o.foundry = sender
@@ -247,12 +251,13 @@ class Contract(gl.Contract):
         2. Delivered Sequencing QC Report (Foundry Production)
         Performs dual-use pathogen screening and pairwise sequence fidelity alignment.
         """
+        self._ensure_initialized()
         if order_id not in self.orders:
-            raise UserError(f"Bio order {int(order_id)} does not exist.")
+            raise gl.UserError(f"Bio order {int(order_id)} does not exist.")
 
         o = self.orders[order_id]
         if o.status != STATUS_IN_SYNTHESIS:
-            raise UserError("Bio order is not awaiting biosecurity and QC adjudication.")
+            raise gl.UserError("Bio order is not awaiting biosecurity and QC adjudication.")
 
         spec_url = o.sequence_spec_url
         qc_url = o.qc_report_url
@@ -458,20 +463,21 @@ Respond ONLY with valid JSON without markdown fences:
         """
         Disputing party stakes a 10% bond during the cooling-off window to challenge the verdict.
         """
+        self._ensure_initialized()
         if order_id not in self.orders:
-            raise UserError(f"Bio order {int(order_id)} does not exist.")
+            raise gl.UserError(f"Bio order {int(order_id)} does not exist.")
 
         o = self.orders[order_id]
         if o.status != STATUS_AWAITING_PAYOUT:
-            raise UserError("Can only dispute orders in AWAITING_PAYOUT status.")
+            raise gl.UserError("Can only dispute orders in AWAITING_PAYOUT status.")
 
         sender = _get_sender()
         if _addr_str(sender) != _addr_str(o.researcher) and _addr_str(sender) != _addr_str(o.foundry):
-            raise UserError("Only the researcher or foundry can appeal this verdict.")
+            raise gl.UserError("Only the researcher or foundry can appeal this verdict.")
 
         now = self._get_current_timestamp()
         if now > (o.audit_completed_at + o.cooling_off_seconds):
-            raise UserError("Dispute cooling-off window has elapsed. Order is eligible for settlement.")
+            raise gl.UserError("Dispute cooling-off window has elapsed. Order is eligible for settlement.")
 
         required_bond = (o.escrow_amount * bigint(10)) // bigint(100)
         if required_bond == bigint(0):
@@ -479,11 +485,11 @@ Respond ONLY with valid JSON without markdown fences:
 
         staked = bigint(gl.message.value)
         if staked < required_bond:
-            raise UserError(f"Dispute bond insufficient. Minimum required: 10% ({required_bond} wei).")
+            raise gl.UserError(f"Dispute bond insufficient. Minimum required: 10% ({required_bond} wei).")
 
         clean_reason = str(dispute_reason).strip()
         if not clean_reason or len(clean_reason) < 10:
-            raise UserError("Substantive dispute justification (at least 10 characters) is required.")
+            raise gl.UserError("Substantive dispute justification (at least 10 characters) is required.")
 
         self.order_counter = self.order_counter + u64(1)
         o.status = STATUS_DISPUTED
@@ -501,16 +507,17 @@ Respond ONLY with valid JSON without markdown fences:
         - If hazardous pathogen is confirmed or detected, 100% of escrow AND dispute bond
           are permanently forfeited to the biosecurity reserve (NO bypass).
         """
+        self._ensure_initialized()
         if order_id not in self.orders:
-            raise UserError(f"Bio order {int(order_id)} does not exist.")
+            raise gl.UserError(f"Bio order {int(order_id)} does not exist.")
 
         o = self.orders[order_id]
         if o.status != STATUS_DISPUTED:
-            raise UserError("Order is not in DISPUTED status.")
+            raise gl.UserError("Order is not in DISPUTED status.")
 
         clean_url = str(supplemental_qc_url).strip()
         if not clean_url.startswith("http://") and not clean_url.startswith("https://"):
-            raise UserError("Valid public supplemental QC evidence URL is required.")
+            raise gl.UserError("Valid public supplemental QC evidence URL is required.")
 
         appellant = o.dispute_initiator
         initial_verdict = o.verdict
@@ -671,16 +678,17 @@ Respond ONLY with valid JSON:
         - BIOHAZARD_BLOCKED: 100% slashed to Biosecurity Reserve
         - SEQUENCE_DEFECTIVE: 100% refunded to Researcher
         """
+        self._ensure_initialized()
         if order_id not in self.orders:
-            raise UserError(f"Bio order {int(order_id)} does not exist.")
+            raise gl.UserError(f"Bio order {int(order_id)} does not exist.")
 
         o = self.orders[order_id]
         if o.status != STATUS_AWAITING_PAYOUT:
-            raise UserError("Bio order is not awaiting settlement payout.")
+            raise gl.UserError("Bio order is not awaiting settlement payout.")
 
         now = self._get_current_timestamp()
         if now <= (o.audit_completed_at + o.cooling_off_seconds):
-            raise UserError("Dispute cooling-off window is still active.")
+            raise gl.UserError("Dispute cooling-off window is still active.")
 
         self.order_counter = self.order_counter + u64(1)
         escrow_val = o.escrow_amount
@@ -705,22 +713,23 @@ Respond ONLY with valid JSON:
     @gl.public.write
     def cancel_or_reclaim(self, order_id: u64) -> None:
         """Bio-Researcher cancels an unclaimed order or reclaims escrow if synthesis expired."""
+        self._ensure_initialized()
         if order_id not in self.orders:
-            raise UserError(f"Bio order {int(order_id)} does not exist.")
+            raise gl.UserError(f"Bio order {int(order_id)} does not exist.")
 
         o = self.orders[order_id]
         if _addr_str(_get_sender()) != _addr_str(o.researcher):
-            raise UserError("Only the ordering researcher can cancel or reclaim.")
+            raise gl.UserError("Only the ordering researcher can cancel or reclaim.")
 
         now = self._get_current_timestamp()
         if o.status == STATUS_IN_SYNTHESIS:
             if now < o.expires_at:
-                raise UserError("Cannot reclaim: Foundry is actively executing synthesis within deadline.")
+                raise gl.UserError("Cannot reclaim: Foundry is actively executing synthesis within deadline.")
         elif o.status == STATUS_ORDER_OPEN:
             if now < o.expires_at:
-                raise UserError("Cannot cancel: Order duration has not yet expired.")
+                raise gl.UserError("Cannot cancel: Order duration has not yet expired.")
         else:
-            raise UserError("Order is already settled, under review, or reclaimed.")
+            raise gl.UserError("Order is already settled, under review, or reclaimed.")
 
         self.order_counter = self.order_counter + u64(1)
         o.status = STATUS_CANCELLED
@@ -739,7 +748,7 @@ Respond ONLY with valid JSON:
     def get_order(self, order_id: u64) -> str:
         """Fetch complete JSON representation of a biological order."""
         if order_id not in self.orders:
-            raise UserError(f"Bio order {int(order_id)} does not exist.")
+            raise gl.UserError(f"Bio order {int(order_id)} does not exist.")
 
         o = self.orders[order_id]
         data = {
@@ -777,7 +786,7 @@ Respond ONLY with valid JSON:
     @gl.public.view
     def get_order_id_by_index(self, idx: int) -> u64:
         if idx < 0 or idx >= len(self.order_ids):
-            raise UserError("Index out of bounds.")
+            raise gl.UserError("Index out of bounds.")
         return self.order_ids[idx]
 
     @gl.public.view
