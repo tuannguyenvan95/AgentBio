@@ -83,28 +83,20 @@ class Contract(gl.Contract):
     owner: Address                 # Explicit protocol administrator
     biosecurity_reserve: Address   # Protocol pool receiving confiscated biohazard fines
 
-    def __init__(self):
+    def __init__(self, owner: Address = Address(ZERO_ADDRESS), reserve: Address = Address(ZERO_ADDRESS)):
         # GenVM auto-initializes TreeMap and DynArray.
-        self.owner = Address(ZERO_ADDRESS)
-        self.biosecurity_reserve = Address(ZERO_ADDRESS)
+        deployer = _get_sender()
+        self.owner = owner if _addr_str(owner) != ZERO_ADDRESS else deployer
+        self.biosecurity_reserve = reserve if _addr_str(reserve) != ZERO_ADDRESS else deployer
         self.total_bio_locked = bigint(0)
         self.total_orders_settled = u32(0)
         self.order_counter = u64(0)
-
-    def _ensure_initialized(self) -> None:
-        """Lazily initialize owner and biosecurity reserve to the first caller if zero address."""
-        sender = _get_sender()
-        if _addr_str(self.owner) == ZERO_ADDRESS:
-            self.owner = sender
-        if _addr_str(self.biosecurity_reserve) == ZERO_ADDRESS:
-            self.biosecurity_reserve = sender
 
     # ── Protocol Governance & Reserve Ownership ───────────────────────
 
     @gl.public.write
     def set_biosecurity_reserve(self, new_reserve: Address) -> None:
         """Securely reassign protocol biosecurity reserve receiver (restricted to owner)."""
-        self._ensure_initialized()
         if _addr_str(_get_sender()) != _addr_str(self.owner):
             raise gl.UserError("Only protocol owner can update biosecurity reserve.")
         if _addr_str(new_reserve) == ZERO_ADDRESS:
@@ -114,7 +106,6 @@ class Contract(gl.Contract):
     @gl.public.write
     def transfer_ownership(self, new_owner: Address) -> None:
         """Transfer administrative ownership of the AgentBio protocol."""
-        self._ensure_initialized()
         if _addr_str(_get_sender()) != _addr_str(self.owner):
             raise gl.UserError("Only protocol owner can transfer ownership.")
         if _addr_str(new_owner) == ZERO_ADDRESS:
@@ -124,7 +115,11 @@ class Contract(gl.Contract):
     # ── Real Timing Utilities ─────────────────────────────────────────
 
     def _get_current_timestamp(self) -> bigint:
-        """Derive trusted execution timestamp strictly from transaction context or environment."""
+        """
+        Derive trusted execution timestamp strictly from the GenVM protocol consensus message.
+        Establishes an authenticated trusted timing path across all validators without local-clock drift.
+        Strictly rejects fallback to local-machine clock or logical block counters.
+        """
         dt_raw = None
         if hasattr(gl, "message_raw") and isinstance(gl.message_raw, dict):
             dt_raw = gl.message_raw.get("datetime")
@@ -141,16 +136,7 @@ class Contract(gl.Contract):
             except Exception:
                 pass
 
-        try:
-            from datetime import datetime, timezone
-            now_dt = datetime.now(timezone.utc)
-            ts = int(now_dt.timestamp())
-            if ts > 0:
-                return bigint(ts)
-        except Exception:
-            pass
-
-        return bigint(int(self.order_counter))
+        raise gl.UserError("Trusted execution timestamp unavailable from GenVM message context.")
 
     def _get_current_block(self) -> u256:
         """Monotonically increasing logical counter maintained for backward compatibility."""
@@ -161,7 +147,6 @@ class Contract(gl.Contract):
     @gl.public.write.payable
     def order_synthesis(self, target_protein_function: str, sequence_spec_url: str, duration_seconds: int) -> u64:
         """Bio-Researcher commissions a DNA/RNA synthesis escrow with authenticated target design."""
-        self._ensure_initialized()
         bounty = bigint(gl.message.value)
         if bounty <= bigint(0):
             raise gl.UserError("DNA synthesis escrow deposit must be greater than 0 GEN.")
@@ -220,7 +205,6 @@ class Contract(gl.Contract):
     @gl.public.write
     def submit_synthesis_proof(self, order_id: u64, qc_report_url: str) -> None:
         """DNA Foundry claims an open order and submits delivery sequencing QC proof."""
-        self._ensure_initialized()
         if order_id not in self.orders:
             raise gl.UserError(f"Bio order {int(order_id)} does not exist.")
 
@@ -251,7 +235,6 @@ class Contract(gl.Contract):
         2. Delivered Sequencing QC Report (Foundry Production)
         Performs dual-use pathogen screening and pairwise sequence fidelity alignment.
         """
-        self._ensure_initialized()
         if order_id not in self.orders:
             raise gl.UserError(f"Bio order {int(order_id)} does not exist.")
 
@@ -463,7 +446,6 @@ Respond ONLY with valid JSON without markdown fences:
         """
         Disputing party stakes a 10% bond during the cooling-off window to challenge the verdict.
         """
-        self._ensure_initialized()
         if order_id not in self.orders:
             raise gl.UserError(f"Bio order {int(order_id)} does not exist.")
 
@@ -507,7 +489,6 @@ Respond ONLY with valid JSON without markdown fences:
         - If hazardous pathogen is confirmed or detected, 100% of escrow AND dispute bond
           are permanently forfeited to the biosecurity reserve (NO bypass).
         """
-        self._ensure_initialized()
         if order_id not in self.orders:
             raise gl.UserError(f"Bio order {int(order_id)} does not exist.")
 
@@ -637,19 +618,25 @@ Respond ONLY with valid JSON:
 
         counterparty = o.foundry if _addr_str(appellant) == _addr_str(o.researcher) else o.researcher
 
-        # ── SETTLEMENT RULE 1: STRICT BIOHAZARD FORFEITURE ────────────
-        # If the order is confirmed as a hazardous bioweapon/pathogen (or prior biohazard was not cleared),
-        # 100% of escrow AND 100% of dispute bond are permanently slashed to the Biosecurity Reserve.
-        if app_verdict == "APPEAL_BIOHAZARD_CONFIRMED" or (initial_verdict == "BIOHAZARD_BLOCKED" and app_verdict != "APPEAL_UPHELD_VERIFIED"):
+        # ── SETTLEMENT RULE 1: STRICT NO-BYPASS BIOHAZARD FORFEITURE ──
+        # An initial BIOHAZARD_BLOCKED verdict can NEVER be converted to APPEAL_UPHELD_VERIFIED
+        # or disburse escrow to the foundry/researcher. Any appeal on an order with an initial
+        # BIOHAZARD_BLOCKED verdict, OR any appellate confirmation of biohazard (APPEAL_BIOHAZARD_CONFIRMED),
+        # permanently forfeits 100% of escrow AND 100% of dispute bond to the Biosecurity Reserve (ZERO BYPASS).
+        if initial_verdict == "BIOHAZARD_BLOCKED" or app_verdict == "APPEAL_BIOHAZARD_CONFIRMED":
             o.status = STATUS_BIOHAZARD_SLASHED
             o.verdict = "BIOHAZARD_BLOCKED"
-            o.reason = f"[APPEAL BIOHAZARD FORFEITURE] Dangerous biological weapon/toxin confirmed. 100% escrow & dispute bond forfeited to Reserve. {app_reason}"
+            o.reason = (
+                f"[STRICT NO-BYPASS BIOHAZARD FORFEITURE] Prohibited select agent / weaponized pathogen detected. "
+                f"100% escrow & dispute bond permanently forfeited to Reserve. (Tribunal finding: {app_reason})"
+            )
             if escrow_val > bigint(0):
                 gl.get_contract_at(self.biosecurity_reserve).emit_transfer(value=u256(escrow_val))
             if bond_val > bigint(0):
                 gl.get_contract_at(self.biosecurity_reserve).emit_transfer(value=u256(bond_val))
 
-        # ── SETTLEMENT RULE 2: APPEAL UPHELD (Synthesis Verified) ──────
+        # ── SETTLEMENT RULE 2: APPEAL UPHELD (Non-Biohazard Synthesis Verified) ──
+        # ONLY permitted if the order was NOT originally blocked as a biohazard (e.g. was SEQUENCE_DEFECTIVE).
         elif app_verdict == "APPEAL_UPHELD_VERIFIED":
             o.status = STATUS_VERIFIED_PAID
             o.verdict = "BIO_SYNTHESIS_VERIFIED"
@@ -678,7 +665,6 @@ Respond ONLY with valid JSON:
         - BIOHAZARD_BLOCKED: 100% slashed to Biosecurity Reserve
         - SEQUENCE_DEFECTIVE: 100% refunded to Researcher
         """
-        self._ensure_initialized()
         if order_id not in self.orders:
             raise gl.UserError(f"Bio order {int(order_id)} does not exist.")
 
@@ -713,7 +699,6 @@ Respond ONLY with valid JSON:
     @gl.public.write
     def cancel_or_reclaim(self, order_id: u64) -> None:
         """Bio-Researcher cancels an unclaimed order or reclaims escrow if synthesis expired."""
-        self._ensure_initialized()
         if order_id not in self.orders:
             raise gl.UserError(f"Bio order {int(order_id)} does not exist.")
 

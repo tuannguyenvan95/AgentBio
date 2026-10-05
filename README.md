@@ -2,7 +2,7 @@
 
 > **Track:** DeSci (Decentralized Science) / Biosecurity / Subjective Consensus  
 > **Target Network:** GenLayer Studionet (Chain ID: `61999` / `0xF1EF`, RPC: `https://studio.genlayer.com/api`)  
-> **Deployed Intelligent Contract:** `0x58E439f80483B72FfAB6704dDB5d447439986549`  
+> **Deployed Intelligent Contract:** `0x7C07Db9a782173D1AaACb75029d9d912EbE019C7`  
 > **Live Production dApp:** [https://agentbio.vercel.app](https://agentbio.vercel.app)  
 > **GitHub Repository:** [https://github.com/tuannguyenvan95/AgentBio](https://github.com/tuannguyenvan95/AgentBio)  
 > **Hackathon Target:** Agent Tank Hackathon — Track: DeSci & Subjective Consensus  
@@ -40,7 +40,9 @@ Contract được xây dựng theo chuẩn mực cao nhất của GenLayer GenVM
 - **Magic Pragma:** `# { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7qqh8sm5q93hwfp7jqmwsfhh8jpz09h6" }`
 - **GenVM Storage Types:** `TreeMap[u64, BioOrder]`, `DynArray[u64]`, `bigint`, `u8`, `u32`, `u64`, `u256`.
 - **Security Canary Token:** `CANARY_AGENT_BIO_SAFETY_V1` ngăn chặn prompt injection.
-- **24-Block Cooling-Off Dispute Window:** Cơ chế hoãn giải ngân 24 block kèm yêu cầu ký quỹ **10% Dispute Bond** để chống griefing và double-payout.
+- **Strict No-Bypass Biohazard Forfeiture:** Phán quyết mầm bệnh nguy hiểm không bao giờ có thể bị đảo ngược khi kháng cáo; 100% Escrow và Bond bị tịch thu vào Quỹ dự trữ.
+- **Trusted Timing Path:** Thời gian thực thi dẫn xuất trực tiếp từ GenVM message datetime, loại bỏ hoàn toàn sai số đồng hồ máy tính cục bộ.
+- **Immediate Constructor Binding:** Quyền quản trị Protocol và Quỹ dự trữ được gán trực tiếp cho Deployer ngay trong hàm dựng `__init__`.
 - **Native Transfers:** `gl.get_contract_at(recipient).emit_transfer(value=u256(amount))`.
 
 ### Vòng đời trạng thái của Đơn hàng Sinh học (BioOrder Status Lifecycle):
@@ -61,11 +63,11 @@ stateDiagram-v2
 
 ---
 
-## 🧪 3. Bảng Kiểm Thử Hợp Đồng (`tests/test_agentbio.py`)
+## 🧪 3. Bảng Kiểm Thử Hợp Đồng (`tests/`)
 
-Tất cả 14 bài test trong 2 test suites được kiểm thử tự động và vượt qua **100%**:
+Tất cả 17 bài test trong 2 test suites được kiểm thử tự động và vượt qua **100%**:
 - `tests/test_agentbio.py`: Kiểm tra 13 test cases về cú pháp GenVM, storage struct, canary token, validator consensus, và behavioral simulation (settlement, cooling-off window, refund, Sybil defence).
-- `tests/test_biosecurity_evidence_and_appeal.py`: Test case chuyên biệt giải quyết triệt để yêu cầu của Steward (Gen. Dave) — chứng minh xác thực đồng thời 2 bằng chứng (`sequence_spec_url` và `qc_report_url`) kèm cơ chế tịch thu 100% escrow và dispute bond vào Biosecurity Reserve khi appeal mầm bệnh độc hại (hoàn toàn không có kẽ hở bypass).
+- `tests/test_biosecurity_evidence_and_appeal.py`: 4 test cases chuyên biệt giải quyết triệt để yêu cầu của Steward (Gen. Dave) — chứng minh xác thực đồng thời 2 bằng chứng (`sequence_spec_url` và `qc_report_url`), quy tắc tịch thu nghiêm ngặt không kẽ hở (*Strict No-Bypass Forfeiture* khi appeal biohazard), gắn quyền sở hữu ngay tại constructor, và đường dẫn thời gian tin cậy (*Trusted Timing Path*).
 
 Để chạy toàn bộ kiểm thử:
 ```bash

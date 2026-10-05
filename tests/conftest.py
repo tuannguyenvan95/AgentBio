@@ -93,7 +93,10 @@ class _MockSimContract:
         self.contract_path = contract_path
         self.orders = {}
         self.order_counter = 0
-        self.caller = None
+        self.caller = sim_client.accounts[0]
+        # In GenVM, deployer is immediately set as owner and biosecurity reserve upon construction
+        self.owner = sim_client.accounts[0]
+        self.biosecurity_reserve = sim_client.accounts[0]
 
     def connect(self, account):
         self.caller = account
@@ -134,7 +137,6 @@ class _MockSimContract:
     def adjudicate_biosecurity_and_qc(self, args):
         oid = args[0]
         order = self.orders[oid]
-        # Retrieve mocks from client provider
         web_mocks = self.client.provider.web_mocks
         llm_mocks = self.client.provider.llm_mocks
 
@@ -148,7 +150,6 @@ class _MockSimContract:
         order["qc_evidence_hash"] = qc_hash
         order["evidence_hash"] = qc_hash
 
-        # Extract verdict from llm mock
         verdict = "BIOHAZARD_BLOCKED"
         reason = "Biohazard detected"
         confidence = 98
@@ -187,18 +188,40 @@ class _MockSimContract:
                 verdict = parsed.get("verdict", verdict)
                 break
 
-        if verdict == "APPEAL_BIOHAZARD_CONFIRMED" or order["verdict"] == "BIOHAZARD_BLOCKED":
+        # STRICT NO-BYPASS RULE:
+        # If order was initially BIOHAZARD_BLOCKED, or appellate jury confirms biohazard,
+        # it can NEVER be overturned to APPEAL_UPHELD_VERIFIED or pay escrow.
+        # Both escrow AND bond are permanently slashed to the Biosecurity Reserve.
+        if order["verdict"] == "BIOHAZARD_BLOCKED" or verdict == "APPEAL_BIOHAZARD_CONFIRMED":
             order["status"] = 4  # STATUS_BIOHAZARD_SLASHED
             order["verdict"] = "BIOHAZARD_BLOCKED"
             order["reason"] = (
-                "Appeal rejected: lethal pathogen or weaponized biological agent confirmed. "
-                "100% escrow & dispute bond forfeited to Reserve."
+                "[STRICT NO-BYPASS BIOHAZARD FORFEITURE] Prohibited select agent / weaponized pathogen detected. "
+                "100% escrow & dispute bond permanently forfeited to Reserve. Zero bypass."
             )
+        elif verdict == "APPEAL_UPHELD_VERIFIED":
+            order["status"] = 3  # STATUS_VERIFIED_PAID
+            order["verdict"] = "BIO_SYNTHESIS_VERIFIED"
+            order["reason"] = "[APPEAL UPHELD] Synthesis verified."
+        else:
+            order["status"] = 5  # STATUS_DEFECTIVE_REFUNDED
+            order["verdict"] = "SEQUENCE_DEFECTIVE"
+            order["reason"] = "[APPEAL DISMISSED] Defective sequence."
+
         return _MockTxResult(None)
 
     def get_order(self, args):
         oid = args[0]
         return _MockCallResult(json.dumps(self.orders[oid]))
+
+    def get_stats(self, args=None):
+        return _MockCallResult(json.dumps({
+            "total_orders": len(self.orders),
+            "total_bio_locked": "0",
+            "total_orders_settled": 0,
+            "owner": self.owner,
+            "biosecurity_reserve": self.biosecurity_reserve
+        }))
 
 
 class _MockProvider:
