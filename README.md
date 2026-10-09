@@ -2,7 +2,7 @@
 
 > **Track:** DeSci (Decentralized Science) / Biosecurity / Subjective Consensus  
 > **Target Network:** GenLayer Studionet (Chain ID: `61999` / `0xF1EF`, RPC: `https://studio.genlayer.com/api`)  
-> **Deployed Intelligent Contract:** `0x7C07Db9a782173D1AaACb75029d9d912EbE019C7`  
+> **Deployed Intelligent Contract:** `0xddF33630eFDF42Ca09ebDCEAfeD0C0Fe56186e44`  
 > **Live Production dApp:** [https://agentbio.vercel.app](https://agentbio.vercel.app)  
 > **GitHub Repository:** [https://github.com/tuannguyenvan95/AgentBio](https://github.com/tuannguyenvan95/AgentBio)  
 > **Hackathon Target:** Agent Tank Hackathon — Track: DeSci & Subjective Consensus  

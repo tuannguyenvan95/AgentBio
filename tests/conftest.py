@@ -129,9 +129,21 @@ class _MockSimContract:
 
     def submit_synthesis_proof(self, args):
         oid, qc_url = args
-        self.orders[oid]["foundry"] = self.caller
-        self.orders[oid]["qc_report_url"] = qc_url
-        self.orders[oid]["status"] = 1  # IN_SYNTHESIS
+        o = self.orders[oid]
+        if o["status"] == 1:
+            if o.get("foundry") and self.caller.lower() != o["foundry"].lower():
+                raise ValueError("Unauthorized: Only the agreed foundry can submit synthesis proof.")
+        elif o["status"] == 0:
+            if self.caller.lower() == o["researcher"].lower():
+                raise ValueError("Researcher cannot fulfill and synthesize their own bio order.")
+            o["foundry"] = self.caller
+            o["agreement_accepted"] = True
+            o["status"] = 1
+        else:
+            raise ValueError(f"Bio order is not open for submission in status {o['status']}.")
+
+        o["qc_report_url"] = qc_url
+        o["reason"] = "Sequencing QC report submitted."
         return _MockTxResult(None)
 
     def adjudicate_biosecurity_and_qc(self, args):
@@ -182,16 +194,15 @@ class _MockSimContract:
         order = self.orders[oid]
         llm_mocks = self.client.provider.llm_mocks
         verdict = "APPEAL_BIOHAZARD_CONFIRMED"
+        reason = "Appellate verdict rendered."
         if llm_mocks:
             for pat, resp in llm_mocks.items():
                 parsed = json.loads(resp)
                 verdict = parsed.get("verdict", verdict)
+                reason = parsed.get("reason", reason)
                 break
 
         # STRICT NO-BYPASS RULE:
-        # If order was initially BIOHAZARD_BLOCKED, or appellate jury confirms biohazard,
-        # it can NEVER be overturned to APPEAL_UPHELD_VERIFIED or pay escrow.
-        # Both escrow AND bond are permanently slashed to the Biosecurity Reserve.
         if order["verdict"] == "BIOHAZARD_BLOCKED" or verdict == "APPEAL_BIOHAZARD_CONFIRMED":
             order["status"] = 4  # STATUS_BIOHAZARD_SLASHED
             order["verdict"] = "BIOHAZARD_BLOCKED"
@@ -202,13 +213,80 @@ class _MockSimContract:
         elif verdict == "APPEAL_UPHELD_VERIFIED":
             order["status"] = 3  # STATUS_VERIFIED_PAID
             order["verdict"] = "BIO_SYNTHESIS_VERIFIED"
-            order["reason"] = "[APPEAL UPHELD] Synthesis verified."
-        else:
+            order["reason"] = f"[VERDICT OVERTURNED] Foundry appeal upheld. Authentic synthesis verified: {reason}"
+        elif verdict == "APPEAL_OVERTURNED_DEFECTIVE":
             order["status"] = 5  # STATUS_DEFECTIVE_REFUNDED
             order["verdict"] = "SEQUENCE_DEFECTIVE"
-            order["reason"] = "[APPEAL DISMISSED] Defective sequence."
+            order["reason"] = f"[VERDICT OVERTURNED] Researcher appeal upheld. Delivery proven defective: {reason}"
+        else:
+            if order["verdict"] == "BIO_SYNTHESIS_VERIFIED":
+                order["status"] = 3
+                order["reason"] = f"[APPEAL DISMISSED] {reason}"
+            else:
+                order["status"] = 5
+                order["verdict"] = "SEQUENCE_DEFECTIVE"
+                order["reason"] = f"[APPEAL DISMISSED] {reason}"
 
         return _MockTxResult(None)
+
+    def accept_synthesis_agreement(self, args):
+        oid = args[0]
+        o = self.orders[oid]
+        if o["status"] != 0:
+            raise ValueError("Bio order is not open for agreement acceptance.")
+        if self.caller.lower() == o["researcher"].lower():
+            raise ValueError("Researcher cannot fulfill or accept their own bio order.")
+        o["foundry"] = self.caller
+        o["agreement_accepted"] = True
+        o["agreement_timestamp"] = "1728400000"
+        o["status"] = 1  # IN_SYNTHESIS
+        return _MockTxResult(None)
+
+    def cancel_or_reclaim(self, args):
+        oid = args[0]
+        o = self.orders[oid]
+        if self.caller.lower() != o["researcher"].lower():
+            raise ValueError("Unauthorized: Only the ordering researcher can cancel or reclaim.")
+        
+        # Check simulated expiry
+        now_ts = 1728400000
+        expires_at = int(o.get("expires_at", 1728400000 + 604800))
+        if o["status"] == 0:
+            if now_ts < expires_at:
+                raise ValueError(f"Cannot cancel: Order duration has not yet expired (expires at {expires_at}, current time is {now_ts}).")
+        elif o["status"] == 1:
+            if now_ts < expires_at:
+                raise ValueError(f"Cannot reclaim: Foundry is actively executing synthesis within deadline (deadline {expires_at}, current time is {now_ts}).")
+        else:
+            raise ValueError(f"Order cannot be cancelled in status {o['status']}.")
+
+        o["status"] = 6  # CANCELLED
+        o["verdict"] = "CANCELLED"
+        o["reason"] = "Bio order expired and escrow reclaimed by researcher."
+        return _MockTxResult(None)
+
+    def recover_disputed_order(self, args):
+        oid = args[0]
+        o = self.orders[oid]
+        if o["status"] != 7:
+            raise ValueError("Bio order is not in DISPUTED status.")
+        if o["verdict"] == "BIO_SYNTHESIS_VERIFIED":
+            o["status"] = 3
+        else:
+            o["status"] = 5
+        return _MockTxResult(None)
+
+    def verify_order_agreement(self, args):
+        oid = args[0]
+        o = self.orders[oid]
+        return _MockCallResult(json.dumps({
+            "order_id": oid,
+            "researcher": o["researcher"],
+            "foundry": o.get("foundry", ""),
+            "terms_hash": o.get("terms_hash", ""),
+            "agreement_accepted": o.get("agreement_accepted", False),
+            "is_valid_bilateral_agreement": bool(o.get("agreement_accepted", False)),
+        }))
 
     def get_order(self, args):
         oid = args[0]
