@@ -33,27 +33,81 @@ except Exception:
     pass
 
 
-def _addr_str(addr: Address) -> str:
-    """Safely format an Address instance into a lowercase hex string."""
+def _addr_str(addr) -> str:
+    """Safely format an Address instance, int, or string into a lowercase hex string."""
+    if addr is None:
+        return ZERO_ADDRESS
+    if isinstance(addr, int):
+        return f"0x{addr:040x}".lower()
+    if isinstance(addr, Address):
+        try:
+            return addr.as_hex.lower()
+        except Exception:
+            try:
+                return f"0x{addr.as_bytes.hex()}".lower()
+            except Exception:
+                return str(addr).lower()
+    if isinstance(addr, str):
+        val_clean = addr.strip().lower()
+        if val_clean.startswith("0x"):
+            raw = val_clean[2:]
+            return f"0x{raw.zfill(40)}".lower()
+        try:
+            num = int(val_clean, 0)
+            return f"0x{num:040x}".lower()
+        except Exception:
+            return val_clean
+    return str(addr).lower()
+
+
+def _to_address(val) -> Address:
+    """Safely convert any input (Address, int, str) into a genuine GenLayer Address instance."""
+    if isinstance(val, Address):
+        return val
+    if isinstance(val, int):
+        try:
+            hex_str = f"0x{val:040x}"
+            if len(hex_str) > 42:
+                hex_str = f"0x{(val & ((1 << 160) - 1)):040x}"
+            return Address(hex_str)
+        except Exception:
+            return Address(ZERO_ADDRESS)
+    if isinstance(val, str):
+        val_clean = val.strip().lower()
+        if not val_clean or val_clean == "0" or val_clean == "0x0" or val_clean == ZERO_ADDRESS:
+            return Address(ZERO_ADDRESS)
+        if val_clean.startswith("0x"):
+            raw_hex = val_clean[2:]
+        else:
+            raw_hex = val_clean
+        try:
+            if all(c in "0123456789abcdef" for c in raw_hex):
+                padded = raw_hex.zfill(40)
+                if len(padded) == 40:
+                    return Address("0x" + padded)
+            num = int(val_clean, 0)
+            return Address(f"0x{(num & ((1 << 160) - 1)):040x}")
+        except Exception:
+            return Address(ZERO_ADDRESS)
     try:
-        return addr.as_hex.lower()
+        return Address(val)
     except Exception:
-        return str(addr).lower()
+        return Address(ZERO_ADDRESS)
 
 
 def _get_sender() -> Address:
     """Safely obtain transaction sender across GenVM runtime versions and static schema parser."""
     try:
-        return gl.message.sender_address
+        return _to_address(gl.message.sender_address)
     except Exception:
         try:
-            return gl.message.sender
+            return _to_address(gl.message.sender)
         except Exception:
             try:
                 if hasattr(gl, "message_raw") and gl.message_raw:
                     snd = gl.message_raw.get("sender_address") if isinstance(gl.message_raw, dict) else getattr(gl.message_raw, "sender_address", None)
                     if snd:
-                        return snd
+                        return _to_address(snd)
             except Exception:
                 pass
             return Address(ZERO_ADDRESS)
@@ -108,6 +162,8 @@ class Contract(gl.Contract):
     def __init__(self, owner: Address = Address(ZERO_ADDRESS), reserve: Address = Address(ZERO_ADDRESS)):
         # GenVM auto-initializes TreeMap and DynArray.
         deployer = _get_sender()
+        owner = _to_address(owner)
+        reserve = _to_address(reserve)
         self.owner = owner if _addr_str(owner) != ZERO_ADDRESS else deployer
         self.biosecurity_reserve = reserve if _addr_str(reserve) != ZERO_ADDRESS else deployer
         self.total_bio_locked = bigint(0)
@@ -121,18 +177,20 @@ class Contract(gl.Contract):
         """Securely reassign protocol biosecurity reserve receiver (restricted to owner)."""
         if _addr_str(_get_sender()) != _addr_str(self.owner):
             raise ContractError("Only protocol owner can update biosecurity reserve.")
-        if _addr_str(new_reserve) == ZERO_ADDRESS:
+        clean_reserve = _to_address(new_reserve)
+        if _addr_str(clean_reserve) == ZERO_ADDRESS:
             raise ContractError("Invalid reserve address.")
-        self.biosecurity_reserve = new_reserve
+        self.biosecurity_reserve = clean_reserve
 
     @gl.public.write
     def transfer_ownership(self, new_owner: Address) -> None:
         """Transfer administrative ownership of the AgentBio protocol."""
         if _addr_str(_get_sender()) != _addr_str(self.owner):
             raise ContractError("Only protocol owner can transfer ownership.")
-        if _addr_str(new_owner) == ZERO_ADDRESS:
+        clean_owner = _to_address(new_owner)
+        if _addr_str(clean_owner) == ZERO_ADDRESS:
             raise ContractError("Invalid new owner address.")
-        self.owner = new_owner
+        self.owner = clean_owner
 
     # ── Real Timing Utilities ─────────────────────────────────────────
 

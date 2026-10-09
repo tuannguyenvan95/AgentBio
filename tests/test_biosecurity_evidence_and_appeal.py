@@ -555,3 +555,25 @@ def test_recovery_path_for_abandoned_disputed_order(client):
     contract.connect(foundry).recover_disputed_order(args=[order_id])
     recovered_order = json.loads(contract.get_order(args=[order_id]).call())
     assert recovered_order["status"] == 3  # Settled to verified
+
+
+def test_deploy_with_custom_int_and_hex_addresses(client):
+    """
+    Verifies that deploying with integer address representations (as sent by GenLayer Studio ABI calldata)
+    and hex strings correctly parses and binds without AttributeError: 'int' object has no attribute 'as_bytes'.
+    """
+    custom_addr_hex = "0x58e439f80483b72ffab6704ddb5d447439986549"
+    custom_addr_int = int(custom_addr_hex, 16)
+
+    # 1. Deploy with int addresses (Studio calldata behavior)
+    contract_int = client.deploy("contracts/contract.py", args=[custom_addr_int, custom_addr_int])
+    stats_int = json.loads(contract_int.get_stats().call())
+    assert stats_int["owner"].lower() == custom_addr_hex
+    assert stats_int["biosecurity_reserve"].lower() == custom_addr_hex
+
+    # 2. Deploy with hex string addresses
+    contract_str = client.deploy("contracts/contract.py", args=[custom_addr_hex, custom_addr_hex])
+    stats_str = json.loads(contract_str.get_stats().call())
+    assert stats_str["owner"].lower() == custom_addr_hex
+    assert stats_str["biosecurity_reserve"].lower() == custom_addr_hex
+

@@ -88,15 +88,24 @@ class _MockTxResult:
 
 
 class _MockSimContract:
-    def __init__(self, sim_client, contract_path):
+    def __init__(self, sim_client, contract_path, args=None):
         self.client = sim_client
         self.contract_path = contract_path
         self.orders = {}
         self.order_counter = 0
         self.caller = sim_client.accounts[0]
         # In GenVM, deployer is immediately set as owner and biosecurity reserve upon construction
-        self.owner = sim_client.accounts[0]
-        self.biosecurity_reserve = sim_client.accounts[0]
+        deployer = sim_client.accounts[0]
+        owner = deployer
+        reserve = deployer
+        if args and len(args) >= 1 and args[0]:
+            o = args[0]
+            owner = f"0x{o:040x}" if isinstance(o, int) else str(o)
+        if args and len(args) >= 2 and args[1]:
+            r = args[1]
+            reserve = f"0x{r:040x}" if isinstance(r, int) else str(r)
+        self.owner = owner
+        self.biosecurity_reserve = reserve
 
     def connect(self, account):
         self.caller = account
@@ -324,8 +333,8 @@ class _MockSimClient:
         ]
         self.provider = _MockProvider()
 
-    def deploy(self, contract_path):
-        return _MockSimContract(self, contract_path)
+    def deploy(self, contract_path, args=None, **kwargs):
+        return _MockSimContract(self, contract_path, args=args)
 
 
 @pytest.fixture
