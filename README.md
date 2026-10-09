@@ -40,7 +40,10 @@ Contract được xây dựng theo chuẩn mực cao nhất của GenLayer GenVM
 - **Magic Pragma:** `# { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7qqh8sm5q93hwfp7jqmwsfhh8jpz09h6" }`
 - **GenVM Storage Types:** `TreeMap[u64, BioOrder]`, `DynArray[u64]`, `bigint`, `u8`, `u32`, `u64`, `u256`.
 - **Security Canary Token:** `CANARY_AGENT_BIO_SAFETY_V1` ngăn chặn prompt injection.
-- **Strict No-Bypass Biohazard Forfeiture:** Phán quyết mầm bệnh nguy hiểm không bao giờ có thể bị đảo ngược khi kháng cáo; 100% Escrow và Bond bị tịch thu vào Quỹ dự trữ.
+- **Authorized Foundry Participation:** Sổ đăng bạ Foundry ủy quyền (`authorized_foundries`, `foundry_lab_ids`) ngăn chặn hoàn toàn ví lạ tùy tiện nhận đơn; hỗ trợ chỉ định đích danh (`target_foundry`).
+- **Immutable Commissioned Specifications:** Khóa mã băm SHA-256 (`spec_evidence_hash`) bất biến tại thời điểm đặt đơn, loại bỏ rủi ro tráo đổi nội dung URL.
+- **Independently Authenticated QC:** Xác thực chứng chỉ phòng lab (`lab_attestation_id`) và mã băm kết quả giải trình tự (`qc_evidence_hash`).
+- **Defensible Biosecurity & Appellate Tribunal:** Tòa án phúc thẩm cho phép đảo ngược phán quyết nhầm mầm bệnh (`APPEAL_BIOHAZARD_OVERTURNED_BENIGN`), bảo vệ quyền lợi chính đáng của nhà nghiên cứu không bị tịch thu tài sản oan.
 - **Trusted Timing Path:** Thời gian thực thi dẫn xuất trực tiếp từ GenVM message datetime, loại bỏ hoàn toàn sai số đồng hồ máy tính cục bộ.
 - **Immediate Constructor Binding:** Quyền quản trị Protocol và Quỹ dự trữ được gán trực tiếp cho Deployer ngay trong hàm dựng `__init__`.
 - **Native Transfers:** `gl.get_contract_at(recipient).emit_transfer(value=u256(amount))`.
@@ -48,26 +51,35 @@ Contract được xây dựng theo chuẩn mực cao nhất của GenLayer GenVM
 ### Vòng đời trạng thái của Đơn hàng Sinh học (BioOrder Status Lifecycle):
 ```mermaid
 stateDiagram-v2
-    [*] --> STATUS_ORDER_OPEN: order_synthesis (Lock Escrow)
-    STATUS_ORDER_OPEN --> STATUS_IN_SYNTHESIS: submit_synthesis_proof (Foundry Claims)
+    [*] --> STATUS_ORDER_OPEN: order_synthesis (Lock Escrow & Commit Spec Hash)
+    STATUS_ORDER_OPEN --> STATUS_IN_SYNTHESIS: accept_synthesis_agreement (Authorized Foundry Binds)
     STATUS_ORDER_OPEN --> STATUS_CANCELLED: cancel_or_reclaim (Expired)
     
-    STATUS_IN_SYNTHESIS --> STATUS_AWAITING_PAYOUT: adjudicate_biosecurity_and_qc (AI Jury Consensus)
+    STATUS_IN_SYNTHESIS --> STATUS_AWAITING_PAYOUT: adjudicate_biosecurity_and_qc (AI Jury Consensus & Hash Verification)
     
-    STATUS_AWAITING_PAYOUT --> STATUS_DISPUTED: appeal_verdict (10% Staked Bond within 24 Blocks)
+    STATUS_AWAITING_PAYOUT --> STATUS_DISPUTED: appeal_verdict (10% Staked Bond within Cooling-Off)
     
     STATUS_AWAITING_PAYOUT --> STATUS_VERIFIED_PAID: finalize_settlement (Fidelity >= 80% & Safe)
     STATUS_AWAITING_PAYOUT --> STATUS_BIOHAZARD_SLASHED: finalize_settlement (Pathogen Detected -> Slashed to Reserve)
     STATUS_AWAITING_PAYOUT --> STATUS_DEFECTIVE_REFUNDED: finalize_settlement (Mutated / Fidelity < 80% -> Refunded)
+    
+    STATUS_DISPUTED --> STATUS_DEFECTIVE_REFUNDED: adjudicate_appeal (Biohazard Overturned Benign / Defect Proven)
+    STATUS_DISPUTED --> STATUS_VERIFIED_PAID: adjudicate_appeal (Foundry Upheld Verified)
+    STATUS_DISPUTED --> STATUS_BIOHAZARD_SLASHED: adjudicate_appeal (Biohazard Confirmed)
 ```
 
 ---
 
 ## 🧪 3. Bảng Kiểm Thử Hợp Đồng (`tests/`)
 
-Tất cả 17 bài test trong 2 test suites được kiểm thử tự động và vượt qua **100%**:
-- `tests/test_agentbio.py`: Kiểm tra 13 test cases về cú pháp GenVM, storage struct, canary token, validator consensus, và behavioral simulation (settlement, cooling-off window, refund, Sybil defence).
-- `tests/test_biosecurity_evidence_and_appeal.py`: 4 test cases chuyên biệt giải quyết triệt để yêu cầu của Steward (Gen. Dave) — chứng minh xác thực đồng thời 2 bằng chứng (`sequence_spec_url` và `qc_report_url`), quy tắc tịch thu nghiêm ngặt không kẽ hở (*Strict No-Bypass Forfeiture* khi appeal biohazard), gắn quyền sở hữu ngay tại constructor, và đường dẫn thời gian tin cậy (*Trusted Timing Path*).
+Tất cả **29 bài test** trong test suites được kiểm thử tự động và vượt qua **100%**:
+- `tests/test_agentbio.py` (13 tests): Kiểm tra cú pháp GenVM, storage struct, canary token, validator consensus, và behavioral simulation (settlement, cooling-off window, refund, Sybil defence).
+- `tests/test_biosecurity_evidence_and_appeal.py` (16 tests): Bao gồm các test đối kháng (Adversarial E2E Tests) kiểm tra:
+  1. Ngăn chặn ví lạ chưa được ủy quyền nhận đơn (`test_unauthorized_wallet_cannot_claim_synthesis_order`).
+  2. Bảo vệ Foundry được chỉ định đích danh (`test_designated_target_foundry_protection_rejects_intruders`).
+  3. Cơ chế phúc thẩm đảo ngược phán quyết nhầm mầm bệnh (`test_defensible_appeal_overturns_false_positive_biohazard_protecting_escrow`).
+  4. Quản trị sổ đăng bạ Foundry (`test_authorized_foundry_registry_governance`).
+  5. Đối soát mã băm bất biến và thời gian thực thi xác thực.
 
 Để chạy toàn bộ kiểm thử:
 ```bash
