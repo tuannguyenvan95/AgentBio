@@ -577,3 +577,158 @@ def test_deploy_with_custom_int_and_hex_addresses(client):
     assert stats_str["owner"].lower() == custom_addr_hex
     assert stats_str["biosecurity_reserve"].lower() == custom_addr_hex
 
+
+def test_unauthorized_wallet_cannot_claim_synthesis_order(client):
+    """
+    CRITICAL STEWARD REDESIGN TEST (Authorized Foundry Participation):
+    Proves that unauthorized wallets CANNOT claim open synthesis orders,
+    enforcing that only accredited foundries in the registry can accept agreements.
+    """
+    contract = client.deploy("contracts/contract.py")
+    researcher = client.accounts[0]
+    unauthorized_wallet = "0x9999999999999999999999999999999999999999"
+
+    tx = contract.connect(researcher).order_synthesis(
+        args=["Therapeutic enzyme synthesis", "https://biosecure.org/spec.fasta", 604800],
+        value=1000000000000000000
+    )
+    order_id = tx.return_value
+
+    # Unauthorized wallet tries to accept synthesis agreement -> REVERT
+    with pytest.raises(Exception) as exc:
+        contract.connect(unauthorized_wallet).accept_synthesis_agreement(args=[order_id])
+    assert "Unauthorized" in str(exc.value)
+
+
+def test_designated_target_foundry_protection_rejects_intruders(client):
+    """
+    CRITICAL STEWARD REDESIGN TEST (Target Foundry Delegation):
+    Proves that when a researcher designates a specific target foundry,
+    no other foundry (even if accredited) can intercept or accept the order.
+    """
+    contract = client.deploy("contracts/contract.py")
+    researcher = client.accounts[0]
+    designated_foundry = client.accounts[1]
+    intruder_foundry = client.accounts[2]
+
+    # Commission order specifically delegating to designated_foundry
+    tx = contract.connect(researcher).order_synthesis(
+        args=[
+            "Designated monoclonal antibody synthesis",
+            "https://biosecure.org/spec.fasta",
+            604800,
+            "",
+            designated_foundry
+        ],
+        value=1000000000000000000
+    )
+    order_id = tx.return_value
+
+    # Intruder foundry tries to accept -> REVERT
+    with pytest.raises(Exception) as exc:
+        contract.connect(intruder_foundry).accept_synthesis_agreement(args=[order_id])
+    assert "designated target foundry" in str(exc.value)
+
+    # Designated foundry accepts successfully
+    contract.connect(designated_foundry).accept_synthesis_agreement(args=[order_id])
+    order = json.loads(contract.get_order(args=[order_id]).call())
+    assert order["status"] == 1
+    assert order["foundry"].lower() == designated_foundry.lower()
+
+
+def test_defensible_appeal_overturns_false_positive_biohazard_protecting_escrow(client):
+    """
+    CRITICAL STEWARD REDESIGN TEST (Defensible Settlement & Appeal Mechanism):
+    Proves that unsupported or false-positive biosecurity classifications do NOT
+    cause irreversible confiscation. If an appeal provides proof that the product
+    is a benign therapeutic, the Appellate Tribunal can overturn the biohazard
+    classification (APPEAL_BIOHAZARD_OVERTURNED_BENIGN) and refund the researcher.
+    """
+    contract = client.deploy("contracts/contract.py")
+    researcher = client.accounts[0]
+    foundry = client.accounts[1]
+    spec_url = "https://biosecure.org/therapeutic_enzyme.fasta"
+    qc_url = "https://foundry-qc.io/run.txt"
+
+    tx = contract.connect(researcher).order_synthesis(
+        args=["Benign therapeutic beta-galactosidase", spec_url, 604800],
+        value=2000000000000000000
+    )
+    order_id = tx.return_value
+    contract.connect(foundry).submit_synthesis_proof(args=[order_id, qc_url])
+
+    # Initial jury falsely flags biohazard (false positive)
+    client.provider.make_request(
+        method="sim_installMocks",
+        params={
+            "llm_mocks": {
+                ".*": json.dumps({
+                    "canary": "CANARY_AGENT_BIO_SAFETY_V1",
+                    "verdict": "BIOHAZARD_BLOCKED",
+                    "confidence": 95,
+                    "fidelity_score": 10,
+                    "reason": "False positive pathogen homology match."
+                })
+            },
+            "web_mocks": {
+                spec_url: {"status": 200, "body": "ATCG"},
+                qc_url: {"status": 200, "body": "ATCG"}
+            }
+        }
+    )
+    contract.connect(researcher).adjudicate_biosecurity_and_qc(args=[order_id])
+    order_initial = json.loads(contract.get_order(args=[order_id]).call())
+    assert order_initial["verdict"] == "BIOHAZARD_BLOCKED"
+
+    # Researcher appeals with substantive justification & staked bond
+    contract.connect(researcher).appeal_verdict(
+        args=[order_id, "Legitimate therapeutic protein certified by mass spec assay."],
+        value=200000000000000000
+    )
+
+    # Appellate tribunal receives certified laboratory proof and overturns biohazard
+    client.provider.make_request(
+        method="sim_installMocks",
+        params={
+            "llm_mocks": {
+                ".*": json.dumps({
+                    "canary": "CANARY_AGENT_BIO_SAFETY_V1",
+                    "verdict": "APPEAL_BIOHAZARD_OVERTURNED_BENIGN",
+                    "reason": "Certified mass spectrometry assay confirms non-toxic therapeutic protein without virulence factors."
+                })
+            },
+            "web_mocks": {
+                "https://certified-lab.org/attestation.pdf": {"status": 200, "body": "Certified Non-Toxic Assays"}
+            }
+        }
+    )
+    contract.connect(researcher).adjudicate_appeal(args=[order_id, "https://certified-lab.org/attestation.pdf"])
+
+    order_final = json.loads(contract.get_order(args=[order_id]).call())
+    # Crucial proof: NOT slashed to reserve, but overturned to refund researcher
+    assert order_final["status"] == 5
+    assert "BIOHAZARD OVERTURNED" in order_final["reason"]
+
+
+def test_authorized_foundry_registry_governance(client):
+    """
+    CRITICAL STEWARD REDESIGN TEST (Foundry Registry Management):
+    Proves that the protocol owner can register and revoke accredited foundries
+    with laboratory certification IDs, and unauthorized accounts cannot.
+    """
+    contract = client.deploy("contracts/contract.py")
+    owner = client.accounts[0]
+    new_foundry = "0x4444444444444444444444444444444444444444"
+
+    # Verify not authorized initially
+    assert not contract.is_authorized_foundry(args=[new_foundry]).call()
+
+    # Owner registers foundry with lab accreditation ID
+    contract.connect(owner).register_foundry(args=[new_foundry, "ISO-17025-LAB-TWIST-88"])
+    assert contract.is_authorized_foundry(args=[new_foundry]).call()
+    assert contract.get_foundry_lab_id(args=[new_foundry]).call() == "ISO-17025-LAB-TWIST-88"
+
+    # Owner revokes foundry
+    contract.connect(owner).revoke_foundry(args=[new_foundry])
+    assert not contract.is_authorized_foundry(args=[new_foundry]).call()
+

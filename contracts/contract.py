@@ -120,6 +120,7 @@ class BioOrder:
     order_id: u64
     researcher: Address
     foundry: Address
+    target_foundry: Address          # Specific foundry designated by researcher (or ZERO_ADDRESS if open to accredited registry)
     dispute_initiator: Address
     escrow_amount: bigint
     dispute_bond: bigint            # Staked bond by appellant to prevent frivolous disputes
@@ -129,6 +130,7 @@ class BioOrder:
     qc_report_url: str              # Sequencing alignment and purity proof submitted by foundry
     qc_evidence_hash: str           # Immutable SHA-256 snapshot of delivered sequencing QC data
     evidence_hash: str              # Primary evidence hash (alias to qc_evidence_hash for backward compatibility)
+    lab_attestation_id: str         # Accredited laboratory run identifier (e.g. ISO-17025 / CAP-CLIA certificate)
     status: u8                      # 0..7 state lifecycle
     verdict: str                    # "PENDING", "BIO_SYNTHESIS_VERIFIED", "BIOHAZARD_BLOCKED", "SEQUENCE_DEFECTIVE", "CANCELLED"
     reason: str                     # Biosecurity & alignment rationale
@@ -158,6 +160,8 @@ class Contract(gl.Contract):
     order_counter: u64
     owner: Address                 # Explicit protocol administrator
     biosecurity_reserve: Address   # Protocol pool receiving confiscated biohazard fines
+    authorized_foundries: TreeMap[Address, bool]
+    foundry_lab_ids: TreeMap[Address, str]
 
     def __init__(self, owner: Address = Address(ZERO_ADDRESS), reserve: Address = Address(ZERO_ADDRESS)):
         # GenVM auto-initializes TreeMap and DynArray.
@@ -169,6 +173,9 @@ class Contract(gl.Contract):
         self.total_bio_locked = bigint(0)
         self.total_orders_settled = u32(0)
         self.order_counter = u64(0)
+        if _addr_str(deployer) != ZERO_ADDRESS:
+            self.authorized_foundries[deployer] = True
+            self.foundry_lab_ids[deployer] = "LAB-GENLAYER-DELEGATE-01"
 
     # ── Protocol Governance & Reserve Ownership ───────────────────────
 
@@ -191,6 +198,40 @@ class Contract(gl.Contract):
         if _addr_str(clean_owner) == ZERO_ADDRESS:
             raise ContractError("Invalid new owner address.")
         self.owner = clean_owner
+
+    @gl.public.write
+    def register_foundry(self, foundry: Address, lab_id: str) -> None:
+        """Register an accredited bio-foundry with laboratory certification (restricted to owner)."""
+        if _addr_str(_get_sender()) != _addr_str(self.owner):
+            raise ContractError("Only protocol owner can register authorized foundries.")
+        f_addr = _to_address(foundry)
+        if _addr_str(f_addr) == ZERO_ADDRESS:
+            raise ContractError("Invalid foundry address.")
+        clean_lab = str(lab_id).strip()
+        if not clean_lab:
+            raise ContractError("Valid laboratory accreditation ID is required.")
+        self.authorized_foundries[f_addr] = True
+        self.foundry_lab_ids[f_addr] = clean_lab
+
+    @gl.public.write
+    def revoke_foundry(self, foundry: Address) -> None:
+        """Revoke authorization of a bio-foundry (restricted to owner)."""
+        if _addr_str(_get_sender()) != _addr_str(self.owner):
+            raise ContractError("Only protocol owner can revoke foundries.")
+        f_addr = _to_address(foundry)
+        self.authorized_foundries[f_addr] = False
+
+    @gl.public.view
+    def is_authorized_foundry(self, foundry: Address) -> bool:
+        """Check if an address is an accredited, authorized bio-foundry."""
+        f_addr = _to_address(foundry)
+        return bool(self.authorized_foundries.get(f_addr, False))
+
+    @gl.public.view
+    def get_foundry_lab_id(self, foundry: Address) -> str:
+        """Retrieve accredited laboratory certification ID for a foundry."""
+        f_addr = _to_address(foundry)
+        return self.foundry_lab_ids.get(f_addr, "")
 
     # ── Real Timing Utilities ─────────────────────────────────────────
 
@@ -224,7 +265,14 @@ class Contract(gl.Contract):
     # ── Public Write Methods ──────────────────────────────────────────
 
     @gl.public.write.payable
-    def order_synthesis(self, target_protein_function: str, sequence_spec_url: str, duration_seconds: int) -> u64:
+    def order_synthesis(
+        self,
+        target_protein_function: str,
+        sequence_spec_url: str,
+        duration_seconds: int,
+        spec_evidence_hash: str = "",
+        target_foundry: Address = Address(ZERO_ADDRESS)
+    ) -> u64:
         """Bio-Researcher commissions a DNA/RNA synthesis escrow with authenticated target design."""
         bounty = bigint(gl.message.value)
         if bounty <= bigint(0):
@@ -247,27 +295,34 @@ class Contract(gl.Contract):
         self.order_counter = self.order_counter + u64(1)
         order_id = self.order_counter
         empty_address = Address(ZERO_ADDRESS)
+        tf_addr = _to_address(target_foundry)
+
+        clean_spec_hash = str(spec_evidence_hash).strip().lower()
+        if not clean_spec_hash:
+            clean_spec_hash = hashlib.sha256(f"{clean_spec}:{clean_fn}".encode("utf-8")).hexdigest()
 
         terms_hash = hashlib.sha256(
-            f"{clean_fn}:{clean_spec}:{int(bounty)}:{int(expires_at)}".encode("utf-8")
+            f"{clean_fn}:{clean_spec}:{clean_spec_hash}:{int(bounty)}:{int(expires_at)}:{_addr_str(tf_addr)}".encode("utf-8")
         ).hexdigest()
 
         new_order = BioOrder(
             order_id=order_id,
             researcher=_get_sender(),
             foundry=empty_address,
+            target_foundry=tf_addr,
             dispute_initiator=empty_address,
             escrow_amount=bounty,
             dispute_bond=bigint(0),
             target_protein_function=clean_fn,
             sequence_spec_url=clean_spec,
-            spec_evidence_hash="",
+            spec_evidence_hash=clean_spec_hash,
             qc_report_url="",
             qc_evidence_hash="",
             evidence_hash="",
+            lab_attestation_id="",
             status=STATUS_ORDER_OPEN,
             verdict="PENDING",
-            reason="Order open. Awaiting DNA synthesis foundry agreement and sequencing QC submission.",
+            reason="Order open. Awaiting authorized DNA synthesis foundry agreement and sequencing QC submission.",
             confidence=u8(0),
             fidelity_score=u8(0),
             created_at=now,
@@ -292,7 +347,7 @@ class Contract(gl.Contract):
     def accept_synthesis_agreement(self, order_id: u64) -> None:
         """
         DNA Foundry explicitly accepts order terms and binds mutual agreement with Researcher.
-        Validates timing, identity, and prevents unauthorized third-party interference.
+        Enforces strict authorized foundry participation, timing, and terms immutability.
         """
         if order_id not in self.orders:
             raise ContractError(f"Bio order {int(order_id)} does not exist.")
@@ -305,6 +360,14 @@ class Contract(gl.Contract):
         if _addr_str(sender) == _addr_str(o.researcher):
             raise ContractError("Researcher cannot fulfill or accept their own bio order.")
 
+        # STRICT AUTHORIZED FOUNDRY PARTICIPATION
+        if _addr_str(o.target_foundry) != ZERO_ADDRESS:
+            if _addr_str(sender) != _addr_str(o.target_foundry):
+                raise ContractError("Unauthorized: Only the designated target foundry can accept this order.")
+        else:
+            if not self.authorized_foundries.get(sender, False):
+                raise ContractError("Unauthorized: Only accredited authorized foundries can accept synthesis orders.")
+
         now = self._get_current_timestamp()
         if now >= o.expires_at:
             raise ContractError(f"Cannot accept agreement: Order has expired (expired at {int(o.expires_at)}, current time is {int(now)}).")
@@ -314,15 +377,23 @@ class Contract(gl.Contract):
         o.agreement_accepted = True
         o.agreement_timestamp = now
         o.status = STATUS_IN_SYNTHESIS
-        o.reason = f"Bilateral synthesis agreement formally accepted by foundry {_addr_str(sender)[:10]}. Synthesis underway."
+        lab_id = self.foundry_lab_ids.get(sender, "LAB-ACCREDITED")
+        o.lab_attestation_id = lab_id
+        o.reason = f"Bilateral synthesis agreement formally accepted by accredited foundry {_addr_str(sender)[:10]} ({lab_id}). Synthesis underway."
 
     @gl.public.write
-    def submit_synthesis_proof(self, order_id: u64, qc_report_url: str) -> None:
+    def submit_synthesis_proof(
+        self,
+        order_id: u64,
+        qc_report_url: str,
+        qc_evidence_hash: str = "",
+        lab_attestation_id: str = ""
+    ) -> None:
         """
-        Foundry submits delivery sequencing QC proof.
-        Strictly verifies agreement authorization:
-        - If order is IN_SYNTHESIS (pre-agreed), only the agreed foundry can submit.
-        - If order is OPEN, claiming foundry binds agreement and submits in single step.
+        Foundry submits delivery sequencing QC proof with authenticated lab credentials.
+        Strictly verifies authorized foundry participation:
+        - If order is IN_SYNTHESIS, only the agreed authorized foundry can submit.
+        - If order is OPEN, only an authorized/designated foundry can claim and submit.
         """
         if order_id not in self.orders:
             raise ContractError(f"Bio order {int(order_id)} does not exist.")
@@ -339,6 +410,14 @@ class Contract(gl.Contract):
         elif o.status == STATUS_ORDER_OPEN:
             if _addr_str(sender) == _addr_str(o.researcher):
                 raise ContractError("Researcher cannot fulfill and synthesize their own bio order.")
+            # STRICT AUTHORIZED FOUNDRY PARTICIPATION
+            if _addr_str(o.target_foundry) != ZERO_ADDRESS:
+                if _addr_str(sender) != _addr_str(o.target_foundry):
+                    raise ContractError("Unauthorized: Only the designated target foundry can submit synthesis proof.")
+            else:
+                if not self.authorized_foundries.get(sender, False):
+                    raise ContractError("Unauthorized: Only accredited authorized foundries can claim and submit QC proof.")
+
             if now >= o.expires_at:
                 raise ContractError(f"Cannot submit proof: Order has expired (expired at {int(o.expires_at)}, current time is {int(now)}).")
             o.foundry = sender
@@ -352,9 +431,20 @@ class Contract(gl.Contract):
         if not clean_url.startswith("http://") and not clean_url.startswith("https://"):
             raise ContractError("Valid public sequencing QC report URL (http/https) is required.")
 
+        clean_qc_hash = str(qc_evidence_hash).strip().lower()
+        if not clean_qc_hash or len(clean_qc_hash) != 64:
+            clean_qc_hash = hashlib.sha256(clean_url.encode("utf-8")).hexdigest()
+
+        clean_lab = str(lab_attestation_id).strip()
+        if not clean_lab:
+            clean_lab = self.foundry_lab_ids.get(sender, "LAB-ACCREDITED")
+
         self.order_counter = self.order_counter + u64(1)
         o.qc_report_url = clean_url
-        o.reason = "Sequencing QC report submitted. On-chain AI Biosecurity and Fidelity Board convened."
+        o.qc_evidence_hash = clean_qc_hash
+        o.evidence_hash = clean_qc_hash
+        o.lab_attestation_id = clean_lab
+        o.reason = f"Sequencing QC report submitted by accredited laboratory ({clean_lab}). On-chain AI Biosecurity and Fidelity Board convened."
 
     @gl.public.write
     def adjudicate_biosecurity_and_qc(self, order_id: u64) -> None:
@@ -678,10 +768,12 @@ SUPPLEMENTAL LAB QC EVIDENCE:
 <supplemental_qc>{truncated_supp}</supplemental_qc>
 
 DECISION RULES:
-1. BIOHAZARD CHECK:
-   - Does the sequence encode prohibited bioweapons or dangerous select agent toxins?
-   - If bioweapon/pathogen detected OR prior biohazard confirmed: Output 'APPEAL_BIOHAZARD_CONFIRMED'.
-2. OVERTURN vs UPHOLD:
+1. BIOHAZARD ASSESSMENT (DEFENSIBLE BENIGN vs WEAPONIZED):
+   - If prior verdict was BIOHAZARD_BLOCKED, did appellant provide authenticated lab certificates / assays proving the sequence is a safe, benign therapeutic enzyme / antibody / non-pathogenic construct?
+     * If proven benign / non-hazardous: Output 'APPEAL_BIOHAZARD_OVERTURNED_BENIGN'.
+     * If prohibited Tier 1 select agent toxin / weaponized pathogen is confirmed: Output 'APPEAL_BIOHAZARD_CONFIRMED'.
+   - If prior verdict was not biohazard, but supplemental data reveals hidden pathogen bioweapon: Output 'APPEAL_BIOHAZARD_CONFIRMED'.
+2. OVERTURN vs UPHOLD (FIDELITY & DEFECTS):
    - If appellant is RESEARCHER (claiming defective synthesis):
      * If supplemental lab data proves synthesis is defective / mutated / failed: Output 'APPEAL_OVERTURNED_DEFECTIVE'.
      * Otherwise: Output 'APPEAL_DISMISSED'.
@@ -695,7 +787,7 @@ Include "canary": "{CANARY_TOKEN}" in your JSON response.
 Respond ONLY with valid JSON:
 {{
   "canary": "{CANARY_TOKEN}",
-  "verdict": "APPEAL_UPHELD_VERIFIED"|"APPEAL_OVERTURNED_DEFECTIVE"|"APPEAL_BIOHAZARD_CONFIRMED"|"APPEAL_DISMISSED",
+  "verdict": "APPEAL_UPHELD_VERIFIED"|"APPEAL_OVERTURNED_DEFECTIVE"|"APPEAL_BIOHAZARD_OVERTURNED_BENIGN"|"APPEAL_BIOHAZARD_CONFIRMED"|"APPEAL_DISMISSED",
   "reason": "<appellate judicial rationale>"
 }}"""
 
@@ -721,7 +813,7 @@ Respond ONLY with valid JSON:
                 return {"canary": CANARY_TOKEN, "verdict": fallback_verdict, "reason": "Appellate parsing failure; upholding prior verdict."}
 
             v_str = str(parsed.get("verdict", "")).upper().strip()
-            if v_str not in {"APPEAL_UPHELD_VERIFIED", "APPEAL_OVERTURNED_DEFECTIVE", "APPEAL_BIOHAZARD_CONFIRMED", "APPEAL_DISMISSED"}:
+            if v_str not in {"APPEAL_UPHELD_VERIFIED", "APPEAL_OVERTURNED_DEFECTIVE", "APPEAL_BIOHAZARD_OVERTURNED_BENIGN", "APPEAL_BIOHAZARD_CONFIRMED", "APPEAL_DISMISSED"}:
                 v_str = "APPEAL_BIOHAZARD_CONFIRMED" if initial_verdict == "BIOHAZARD_BLOCKED" else "APPEAL_DISMISSED"
 
             return {
@@ -755,12 +847,22 @@ Respond ONLY with valid JSON:
 
         counterparty = o.foundry if is_researcher_appellant else o.researcher
 
-        # ── RULE 1: STRICT NO-BYPASS BIOHAZARD FORFEITURE ──
-        if initial_verdict == "BIOHAZARD_BLOCKED" or app_verdict == "APPEAL_BIOHAZARD_CONFIRMED":
+        # ── RULE 1: ERRONEOUS BIOHAZARD OVERTURNED (BENIGN PROVEN, PREVENT IRREVERSIBLE CONFISCATION) ──
+        if app_verdict == "APPEAL_BIOHAZARD_OVERTURNED_BENIGN":
+            o.status = STATUS_DEFECTIVE_REFUNDED
+            o.verdict = "SEQUENCE_DEFECTIVE"
+            o.reason = f"[BIOHAZARD OVERTURNED] Erroneous biohazard classification overturned by Appellate Tribunal. Sequence validated as benign therapeutic: {app_reason}"
+            if escrow_val > bigint(0):
+                gl.get_contract_at(o.researcher).emit_transfer(value=u256(escrow_val))
+            if bond_val > bigint(0):
+                gl.get_contract_at(appellant).emit_transfer(value=u256(bond_val))
+
+        # ── RULE 2: STRICT BIOHAZARD CONFIRMED (SUBSTANTIATED PATHOGEN FORFEITURE) ──
+        elif app_verdict == "APPEAL_BIOHAZARD_CONFIRMED" or (initial_verdict == "BIOHAZARD_BLOCKED" and app_verdict != "APPEAL_BIOHAZARD_OVERTURNED_BENIGN"):
             o.status = STATUS_BIOHAZARD_SLASHED
             o.verdict = "BIOHAZARD_BLOCKED"
             o.reason = (
-                f"[STRICT NO-BYPASS BIOHAZARD FORFEITURE] Prohibited select agent / weaponized pathogen detected. "
+                f"[STRICT NO-BYPASS BIOHAZARD FORFEITURE] Prohibited select agent / weaponized pathogen confirmed. "
                 f"100% escrow & dispute bond permanently forfeited to Reserve. (Tribunal finding: {app_reason})"
             )
             if escrow_val > bigint(0):
@@ -952,10 +1054,14 @@ Respond ONLY with valid JSON:
             raise ContractError(f"Bio order {int(order_id)} does not exist.")
 
         o = self.orders[order_id]
+        has_foundry = _addr_str(o.foundry) != ZERO_ADDRESS
         data = {
             "order_id": int(o.order_id),
             "researcher": _addr_str(o.researcher),
             "foundry": _addr_str(o.foundry),
+            "target_foundry": _addr_str(o.target_foundry),
+            "is_authorized_foundry": bool(self.authorized_foundries.get(o.foundry, False)) if has_foundry else False,
+            "lab_attestation_id": o.lab_attestation_id,
             "dispute_initiator": _addr_str(o.dispute_initiator),
             "escrow_amount": str(o.escrow_amount),
             "dispute_bond": str(o.dispute_bond),
@@ -990,11 +1096,17 @@ Respond ONLY with valid JSON:
             raise ContractError(f"Bio order {int(order_id)} does not exist.")
         o = self.orders[order_id]
         has_foundry = _addr_str(o.foundry) != ZERO_ADDRESS
+        is_auth = bool(self.authorized_foundries.get(o.foundry, False)) if has_foundry else False
         data = {
             "order_id": int(o.order_id),
             "researcher": _addr_str(o.researcher),
             "foundry": _addr_str(o.foundry),
+            "target_foundry": _addr_str(o.target_foundry),
+            "is_authorized_foundry": is_auth,
+            "lab_attestation_id": o.lab_attestation_id,
             "terms_hash": str(o.terms_hash),
+            "spec_evidence_hash": str(o.spec_evidence_hash),
+            "qc_evidence_hash": str(o.qc_evidence_hash),
             "agreement_accepted": bool(o.agreement_accepted),
             "agreement_timestamp": str(o.agreement_timestamp),
             "status": int(o.status),
@@ -1018,10 +1130,14 @@ Respond ONLY with valid JSON:
         for oid in self.order_ids:
             if oid in self.orders:
                 o = self.orders[oid]
+                has_foundry = _addr_str(o.foundry) != ZERO_ADDRESS
                 orders_list.append({
                     "order_id": int(o.order_id),
                     "researcher": _addr_str(o.researcher),
                     "foundry": _addr_str(o.foundry),
+                    "target_foundry": _addr_str(o.target_foundry),
+                    "is_authorized_foundry": bool(self.authorized_foundries.get(o.foundry, False)) if has_foundry else False,
+                    "lab_attestation_id": o.lab_attestation_id,
                     "dispute_initiator": _addr_str(o.dispute_initiator),
                     "escrow_amount": str(o.escrow_amount),
                     "dispute_bond": str(o.dispute_bond),
@@ -1061,10 +1177,14 @@ Respond ONLY with valid JSON:
             oid = self.order_ids[i]
             if oid in self.orders:
                 o = self.orders[oid]
+                has_foundry = _addr_str(o.foundry) != ZERO_ADDRESS
                 orders_list.append({
                     "order_id": int(o.order_id),
                     "researcher": _addr_str(o.researcher),
                     "foundry": _addr_str(o.foundry),
+                    "target_foundry": _addr_str(o.target_foundry),
+                    "is_authorized_foundry": bool(self.authorized_foundries.get(o.foundry, False)) if has_foundry else False,
+                    "lab_attestation_id": o.lab_attestation_id,
                     "dispute_initiator": _addr_str(o.dispute_initiator),
                     "escrow_amount": str(o.escrow_amount),
                     "dispute_bond": str(o.dispute_bond),

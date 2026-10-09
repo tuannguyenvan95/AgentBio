@@ -87,6 +87,9 @@ export interface BioOrderData {
   order_id: number;
   researcher: string;
   foundry: string;
+  target_foundry?: string;
+  is_authorized_foundry?: boolean;
+  lab_attestation_id?: string;
   dispute_initiator?: string;
   escrow_amount: string;
   dispute_bond?: string;

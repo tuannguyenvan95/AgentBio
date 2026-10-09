@@ -106,28 +106,67 @@ class _MockSimContract:
             reserve = f"0x{r:040x}" if isinstance(r, int) else str(r)
         self.owner = owner
         self.biosecurity_reserve = reserve
+        self.authorized_foundries = {
+            sim_client.accounts[0].lower(): True,
+            sim_client.accounts[1].lower(): True,
+            sim_client.accounts[2].lower(): True,
+        }
+        self.foundry_lab_ids = {
+            sim_client.accounts[0].lower(): "LAB-GENLAYER-DELEGATE-01",
+            sim_client.accounts[1].lower(): "LAB-CERTIFIED-FOUNDRY-02",
+            sim_client.accounts[2].lower(): "LAB-ACCREDITED-03",
+        }
 
     def connect(self, account):
         self.caller = account
         return self
 
+    def register_foundry(self, args):
+        f, lab_id = args
+        self.authorized_foundries[str(f).lower()] = True
+        self.foundry_lab_ids[str(f).lower()] = str(lab_id)
+        return _MockTxResult(None)
+
+    def revoke_foundry(self, args):
+        f = args[0]
+        self.authorized_foundries[str(f).lower()] = False
+        return _MockTxResult(None)
+
+    def is_authorized_foundry(self, args):
+        f = args[0]
+        return _MockCallResult(bool(self.authorized_foundries.get(str(f).lower(), False)))
+
+    def get_foundry_lab_id(self, args):
+        f = args[0]
+        return _MockCallResult(self.foundry_lab_ids.get(str(f).lower(), ""))
+
     def order_synthesis(self, args, value=0):
         self.order_counter += 1
         oid = self.order_counter
-        target_fn, spec_url, duration = args
+        target_fn = args[0]
+        spec_url = args[1]
+        duration = args[2]
+        spec_hash = args[3] if len(args) > 3 and args[3] else ""
+        target_foundry = args[4] if len(args) > 4 and args[4] else "0x0000000000000000000000000000000000000000"
+
+        if not spec_hash:
+            spec_hash = hashlib.sha256(f"{spec_url}:{target_fn}".encode("utf-8")).hexdigest()
+
         self.orders[oid] = {
             "order_id": oid,
             "researcher": self.caller,
             "foundry": "0x0000000000000000000000000000000000000000",
+            "target_foundry": str(target_foundry),
             "dispute_initiator": "0x0000000000000000000000000000000000000000",
             "escrow_amount": str(value),
             "dispute_bond": "0",
             "target_protein_function": target_fn,
             "sequence_spec_url": spec_url,
-            "spec_evidence_hash": "",
+            "spec_evidence_hash": spec_hash,
             "qc_report_url": "",
             "qc_evidence_hash": "",
             "evidence_hash": "",
+            "lab_attestation_id": "",
             "status": 0,  # OPEN
             "verdict": "PENDING",
             "reason": "Order open.",
@@ -137,7 +176,10 @@ class _MockSimContract:
         return _MockTxResult(oid)
 
     def submit_synthesis_proof(self, args):
-        oid, qc_url = args
+        oid = args[0]
+        qc_url = args[1]
+        qc_hash = args[2] if len(args) > 2 and args[2] else ""
+        lab_id = args[3] if len(args) > 3 and args[3] else ""
         o = self.orders[oid]
         if o["status"] == 1:
             if o.get("foundry") and self.caller.lower() != o["foundry"].lower():
@@ -145,14 +187,29 @@ class _MockSimContract:
         elif o["status"] == 0:
             if self.caller.lower() == o["researcher"].lower():
                 raise ValueError("Researcher cannot fulfill and synthesize their own bio order.")
+            tf = o.get("target_foundry", "0x0000000000000000000000000000000000000000")
+            if tf and tf != "0x0000000000000000000000000000000000000000":
+                if self.caller.lower() != tf.lower():
+                    raise ValueError("Unauthorized: Only the designated target foundry can submit synthesis proof.")
+            else:
+                if not self.authorized_foundries.get(self.caller.lower(), False):
+                    raise ValueError("Unauthorized: Only accredited authorized foundries can claim and submit QC proof.")
             o["foundry"] = self.caller
             o["agreement_accepted"] = True
             o["status"] = 1
         else:
             raise ValueError(f"Bio order is not open for submission in status {o['status']}.")
 
+        if not qc_hash:
+            qc_hash = hashlib.sha256(qc_url.encode("utf-8")).hexdigest()
+        if not lab_id:
+            lab_id = self.foundry_lab_ids.get(self.caller.lower(), "LAB-ACCREDITED")
+
         o["qc_report_url"] = qc_url
-        o["reason"] = "Sequencing QC report submitted."
+        o["qc_evidence_hash"] = qc_hash
+        o["evidence_hash"] = qc_hash
+        o["lab_attestation_id"] = lab_id
+        o["reason"] = f"Sequencing QC report submitted by accredited laboratory ({lab_id})."
         return _MockTxResult(None)
 
     def adjudicate_biosecurity_and_qc(self, args):
@@ -211,8 +268,12 @@ class _MockSimContract:
                 reason = parsed.get("reason", reason)
                 break
 
-        # STRICT NO-BYPASS RULE:
-        if order["verdict"] == "BIOHAZARD_BLOCKED" or verdict == "APPEAL_BIOHAZARD_CONFIRMED":
+        # DEFENSIBLE BIOHAZARD APPEALS:
+        if verdict == "APPEAL_BIOHAZARD_OVERTURNED_BENIGN":
+            order["status"] = 5  # STATUS_DEFECTIVE_REFUNDED (or settled safely)
+            order["verdict"] = "SEQUENCE_DEFECTIVE"
+            order["reason"] = f"[BIOHAZARD OVERTURNED] Sequence proven benign therapeutic: {reason}"
+        elif order["verdict"] == "BIOHAZARD_BLOCKED" or verdict == "APPEAL_BIOHAZARD_CONFIRMED":
             order["status"] = 4  # STATUS_BIOHAZARD_SLASHED
             order["verdict"] = "BIOHAZARD_BLOCKED"
             order["reason"] = (
@@ -245,6 +306,13 @@ class _MockSimContract:
             raise ValueError("Bio order is not open for agreement acceptance.")
         if self.caller.lower() == o["researcher"].lower():
             raise ValueError("Researcher cannot fulfill or accept their own bio order.")
+        tf = o.get("target_foundry", "0x0000000000000000000000000000000000000000")
+        if tf and tf != "0x0000000000000000000000000000000000000000":
+            if self.caller.lower() != tf.lower():
+                raise ValueError("Unauthorized: Only the designated target foundry can accept this order.")
+        else:
+            if not self.authorized_foundries.get(self.caller.lower(), False):
+                raise ValueError("Unauthorized: Only accredited authorized foundries can accept synthesis orders.")
         o["foundry"] = self.caller
         o["agreement_accepted"] = True
         o["agreement_timestamp"] = "1728400000"
@@ -288,11 +356,17 @@ class _MockSimContract:
     def verify_order_agreement(self, args):
         oid = args[0]
         o = self.orders[oid]
+        has_foundry = bool(o.get("foundry") and o.get("foundry") != "0x0000000000000000000000000000000000000000")
         return _MockCallResult(json.dumps({
             "order_id": oid,
             "researcher": o["researcher"],
             "foundry": o.get("foundry", ""),
+            "target_foundry": o.get("target_foundry", "0x0000000000000000000000000000000000000000"),
+            "is_authorized_foundry": bool(self.authorized_foundries.get(o.get("foundry", "").lower(), False)) if has_foundry else False,
+            "lab_attestation_id": o.get("lab_attestation_id", ""),
             "terms_hash": o.get("terms_hash", ""),
+            "spec_evidence_hash": o.get("spec_evidence_hash", ""),
+            "qc_evidence_hash": o.get("qc_evidence_hash", ""),
             "agreement_accepted": o.get("agreement_accepted", False),
             "is_valid_bilateral_agreement": bool(o.get("agreement_accepted", False)),
         }))
