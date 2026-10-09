@@ -42,14 +42,21 @@ def _addr_str(addr: Address) -> str:
 
 
 def _get_sender() -> Address:
-    """Safely obtain transaction sender across GenVM runtime versions."""
+    """Safely obtain transaction sender across GenVM runtime versions and static schema parser."""
     try:
         return gl.message.sender_address
     except Exception:
         try:
             return gl.message.sender
         except Exception:
-            raise ContractError("Cannot resolve sender address.")
+            try:
+                if hasattr(gl, "message_raw") and gl.message_raw:
+                    snd = gl.message_raw.get("sender_address") if isinstance(gl.message_raw, dict) else getattr(gl.message_raw, "sender_address", None)
+                    if snd:
+                        return snd
+            except Exception:
+                pass
+            return Address(ZERO_ADDRESS)
 
 
 @allow_storage
