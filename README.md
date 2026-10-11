@@ -2,7 +2,7 @@
 
 > **Track:** DeSci (Decentralized Science) / Biosecurity / Subjective Consensus  
 > **Target Network:** GenLayer Studionet (Chain ID: `61999` / `0xF1EF`, RPC: `https://studio.genlayer.com/api`)  
-> **Deployed Intelligent Contract:** `0x686b45256e00aF90Cdb2112077D16B9D0970b998`  
+> **Deployed Intelligent Contract:** `0x149E5B8B3D7392135F857403D7e0EF7cB3C2E315`  
 > **Live Production dApp:** [https://agentbio.vercel.app](https://agentbio.vercel.app)  
 > **GitHub Repository:** [https://github.com/tuannguyenvan95/AgentBio](https://github.com/tuannguyenvan95/AgentBio)  
 > **Hackathon Target:** Agent Tank Hackathon — Track: DeSci & Subjective Consensus  
@@ -72,14 +72,10 @@ stateDiagram-v2
 
 ## 🧪 3. Bảng Kiểm Thử Hợp Đồng (`tests/`) & Giao Dịch Live StudioNet
 
-Tất cả **36 bài test** trong test suites được kiểm thử tự động và vượt qua **100%**:
+Tất cả **40 bài test** trong test suites được kiểm thử tự động và vượt qua **100%**:
+- `tests/test_agent_bio.py` (4 tests): Các kịch bản trọng yếu do Steward yêu cầu (Genuine content commitments, Retrieval failure separation, 80% fidelity enforcement, Accredited appeals).
 - `tests/test_agentbio.py` (13 tests): Kiểm tra cú pháp GenVM, storage struct, canary token, validator consensus, và behavioral simulation (settlement, cooling-off window, refund, Sybil defence).
-- `tests/test_biosecurity_evidence_and_appeal.py` (23 tests): Bao gồm các test đối kháng (Adversarial E2E Tests) kiểm tra:
-  1. **Genuine Content Commitments:** Bắt buộc 64-hex SHA-256 nội dung tài liệu (`spec_evidence_hash`, `qc_evidence_hash`), loại bỏ 100% fallback hash URL.
-  2. **Separate Retrieval Failures:** Lỗi tải URL (404/500/timeout) hủy giao dịch sạch không phạt `SEQUENCE_DEFECTIVE`.
-  3. **Strengthened Appeals:** Yêu cầu phòng lab chứng thực trong sổ đăng bạ (`certifying_lab`) và cam kết chứng cứ bổ sung 64-hex.
-  4. **Strict 80% Fidelity Enforcement:** Đảm bảo validator và logic state machine độc lập cưỡng chế fidelity < 80% không bao giờ được `BIO_SYNTHESIS_VERIFIED`.
-  5. **Bảo vệ Foundry chỉ định:** Ngăn chặn ví lạ hoặc bên thứ ba xâm nhập đơn hàng.
+- `tests/test_biosecurity_evidence_and_appeal.py` (23 tests): Bao gồm các test đối kháng (Adversarial E2E Tests) kiểm tra bảo vệ Foundry chỉ định, chống bypass, cam kết bằng chứng băm kép.
 
 Để chạy toàn bộ kiểm thử:
 ```bash
@@ -87,14 +83,14 @@ pytest tests/
 ```
 
 ### ⛓️ Bằng Chứng Giao Dịch Live On-Chain Trên GenLayer StudioNet:
-- **Deployed Contract:** `0x686b45256e00aF90Cdb2112077D16B9D0970b998`
-- **Deploy Transaction:** `0x1e1a36b4d9d3ac21ad972cdf1b56de7fbb870e72981e1d4ec9489a0d2f594d36`
-- **Register Authorized Foundry:** `0xa2f6c423364050cf8881978458b8259dd5b11cc010367fe4b2969802e549b320`
-- **Order Synthesis (64-hex Spec Hash):** `0x60c60d295cf7d2236b6e075bc71b55bd62f04b98eaa07917295e9071c9f3f5f5`
-- **Accept Synthesis Agreement:** `0xd67801aa8632941a0f24735b1c4e02236000af151d61b7ce7d2642cd332b14e0`
-- **Submit QC Proof (64-hex QC Hash):** `0xfe78158d6c52ec9c9c14021a5f1e0d8a40cca977267ed583d082ab17e2302a55`
-- **Validator Consensus Adjudication:** `0xaed980180d54db3fcc55941900e4cc2d40d9f1cbd7cd3f6f43400bf941fb9673` *(Rendered BIO_SYNTHESIS_VERIFIED, 100% Fidelity, 100% Confidence)*
-- **Order Synthesis #2 (Open Benchmark):** `0xc25571260eb48e8ffa23c4d9182cac538a37fa87a15d3abb5b825a261276d68b`
+- **Deployed Contract:** `0x149E5B8B3D7392135F857403D7e0EF7cB3C2E315`
+- **Deploy Transaction:** `0xb7f6af2977cdae1288b85d27058eaf818a508fb81818693711100587c78f5c1b`
+- **Register Authorized Foundry:** `0x1fdc7ede554f9340548980e158c48e4c23bc01b73d148a68c1312be76e623379`
+- **Order Synthesis (64-hex Spec Hash):** `0x525b35e8452084f27ec10372b0e835f305ce39a7adcfeea84055d7d88bd4b4ab`
+- **Accept Synthesis Agreement:** `0xda4c5c49b28cc40b04934c131948a0df272bc38336e7cbecd6daf2b3167e57fe`
+- **Submit QC Proof (64-hex QC Hash):** `0xef6a47a761dba2ffd5b8dcb6166bcbf153c5b919188da4f29effb740beae2f64`
+- **Validator Consensus Adjudication:** `0xc2e20959e0220ffa015ae436cf42c2cdeba47b02ceed12c557bb8d5e421a5ef8` *(Rendered BIO_SYNTHESIS_VERIFIED, 100% Fidelity, 99% Confidence)*
+- **Order Synthesis #2 (Open Benchmark):** `0xf906c7d386134ba7d7de8a827d64ba4a791a0708d71e1b6538a5372de3075364`
 
 ---
 

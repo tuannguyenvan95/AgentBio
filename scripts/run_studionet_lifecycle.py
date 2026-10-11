@@ -5,10 +5,11 @@ import time
 import urllib.request
 import hashlib
 from genlayer_py import create_client, create_account, studionet
+from genlayer_py.types import CalldataAddress
 
 RESEARCHER_PK = "0x1b807b1df022a40f872596b11565e6b6856547dc66996bd3d5a85b376ea3a0ef"
 FOUNDRY_PK = "0x8eb1e7db29f0b8932900fe3c90627ef8a9d48659d1d04fddf2a7369cfa670064"
-CONTRACT = "0x686b45256e00aF90Cdb2112077D16B9D0970b998"
+CONTRACT = "0x149E5B8B3D7392135F857403D7e0EF7cB3C2E315"
 
 
 def fetch_and_hash(url: str) -> str:
@@ -39,13 +40,13 @@ def main():
 
     # STEP 1: Register Foundry in Accreditation Registry
     print("\n--- STEP 1: Register Authorized Foundry in Registry ---", flush=True)
-    is_auth = r_client.read_contract(address=CONTRACT, function_name="is_authorized_foundry", args=[f_acct.address])
+    is_auth = r_client.read_contract(address=CONTRACT, function_name="is_authorized_foundry", args=[CalldataAddress(f_acct.address)])
     if not is_auth:
         print(f"[*] Registering {f_acct.address} as accredited foundry...", flush=True)
         tx_reg = r_client.write_contract(
             address=CONTRACT,
             function_name="register_foundry",
-            args=[f_acct.address, "ISO-17025-TWIST-BIOSYNTH-01"]
+            args=[CalldataAddress(f_acct.address), "ISO-17025-TWIST-BIOSYNTH-01"]
         )
         print(f"[+] Register Foundry Tx: {tx_reg}", flush=True)
         r_client.wait_for_transaction_receipt(tx_reg)
@@ -54,21 +55,21 @@ def main():
     else:
         print(f"[+] Foundry {f_acct.address} is already accredited in registry.", flush=True)
 
-    # STEP 2: Commission Synthesis Order with Genuine 64-Hex Content Commitment
+    # STEP 2: Commission Designated Synthesis Order with Genuine 64-Hex Content Commitment
     print("\n--- STEP 2: Commission DNA Synthesis Order (Order #1) ---", flush=True)
     spec_url1 = "https://raw.githubusercontent.com/tuannguyenvan95/AgentBio/main/data/anti_il6_receptor.fasta"
     spec_hash1 = fetch_and_hash(spec_url1)
 
     tx_order1 = r_client.write_contract(
         address=CONTRACT,
-        function_name="order_synthesis",
-        value=int(0.02 * 1e18),  # 0.02 GEN escrow
+        function_name="order_synthesis_designated",
+        value=int(0.015 * 1e18),  # 0.015 GEN escrow
         args=[
             "Monoclonal antibody IgG1 heavy chain targeting IL-6 cytokine receptor for cytokine storm suppression",
             spec_url1,
             86400 * 7,
             spec_hash1,
-            f_acct.address  # Designated accredited target foundry
+            CalldataAddress(f_acct.address)  # Designated accredited target foundry
         ]
     )
     print(f"[+] Order Synthesis Tx: {tx_order1}", flush=True)
@@ -90,35 +91,45 @@ def main():
 
     # STEP 4: Submit Synthesis Proof with Genuine 64-Hex QC Content Commitment
     print("\n--- STEP 4: Submit Sequencing QC Delivery Proof ---", flush=True)
-    # The delivery QC URL points to authentic sequenced file
     qc_url1 = "https://raw.githubusercontent.com/tuannguyenvan95/AgentBio/main/data/anti_il6_receptor.fasta"
     qc_hash1 = spec_hash1
 
     tx_proof = f_client.write_contract(
         address=CONTRACT,
         function_name="submit_synthesis_proof",
-        args=[1, qc_url1, qc_hash1, "ISO-17025-TWIST-BIOSYNTH-01"]
+        args=[1, qc_url1, qc_hash1]
     )
     print(f"[+] Submit Proof Tx: {tx_proof}", flush=True)
     f_client.wait_for_transaction_receipt(tx_proof)
     lifecycle_txs["submit_synthesis_proof"] = str(tx_proof)
     print("[+] Synthesis proof and QC content commitment recorded on-chain!", flush=True)
 
-    # STEP 5: Commission Order #2 (Open synthesis benchmark)
-    print("\n--- STEP 5: Commission Open Synthesis Order (Order #2) ---", flush=True)
+    # STEP 5: Convene AI Biosecurity Jury Adjudication
+    print("\n--- STEP 5: Convene AI Biosecurity Jury Adjudication ---", flush=True)
+    tx_adjudicate = r_client.write_contract(
+        address=CONTRACT,
+        function_name="adjudicate_biosecurity_and_qc",
+        args=[1]
+    )
+    print(f"[+] Adjudicate Biosecurity Tx: {tx_adjudicate}", flush=True)
+    r_client.wait_for_transaction_receipt(tx_adjudicate)
+    lifecycle_txs["adjudicate_biosecurity"] = str(tx_adjudicate)
+    print("[+] Biosecurity & QC consensus adjudication completed on-chain!", flush=True)
+
+    # STEP 6: Commission Open Synthesis Order (Order #2)
+    print("\n--- STEP 6: Commission Open Synthesis Order (Order #2) ---", flush=True)
     spec_url2 = "https://raw.githubusercontent.com/tuannguyenvan95/AgentBio/main/data/cas9_bcl11a.fasta"
     spec_hash2 = fetch_and_hash(spec_url2)
 
     tx_order2 = r_client.write_contract(
         address=CONTRACT,
         function_name="order_synthesis",
-        value=int(0.015 * 1e18),  # 0.015 GEN escrow
+        value=int(0.01 * 1e18),  # 0.01 GEN escrow
         args=[
             "CRISPR-Cas9 guide RNA targeting BCL11A erythroid enhancer for therapeutic hemoglobin reactivation",
             spec_url2,
             86400 * 7,
-            spec_hash2,
-            "0x0000000000000000000000000000000000000000"  # Open to any accredited foundry
+            spec_hash2
         ]
     )
     print(f"[+] Order Synthesis #2 Tx: {tx_order2}", flush=True)
@@ -126,8 +137,8 @@ def main():
     lifecycle_txs["order_synthesis_2"] = str(tx_order2)
     print("[+] Order #2 confirmed on-chain!", flush=True)
 
-    # STEP 6: Read On-Chain State & Output Evidence Record
-    print("\n--- STEP 6: Final On-Chain Verification & Evidence Record ---", flush=True)
+    # STEP 7: Read On-Chain State & Output Evidence Record
+    print("\n--- STEP 7: Final On-Chain Verification & Evidence Record ---", flush=True)
     stats = r_client.read_contract(address=CONTRACT, function_name="get_stats", args=[])
     print(f"[+] Protocol Stats: {stats}", flush=True)
     count = r_client.read_contract(address=CONTRACT, function_name="get_order_count", args=[])
@@ -140,9 +151,10 @@ def main():
     with open(evidence_path, "w") as f:
         json.dump({
             "contract_address": CONTRACT,
-            "deploy_tx": "0x1e1a36b4d9d3ac21ad972cdf1b56de7fbb870e72981e1d4ec9489a0d2f594d36",
+            "deploy_tx": "0xb7f6af2977cdae1288b85d27058eaf818a508fb81818693711100587c78f5c1b",
             "lifecycle_transactions": lifecycle_txs,
-            "stats": json.loads(stats) if isinstance(stats, str) else stats
+            "stats": json.loads(stats) if isinstance(stats, str) else stats,
+            "order_1": json.loads(order1) if isinstance(order1, str) else order1
         }, f, indent=2)
     print(f"\n[+] Saved live StudioNet lifecycle evidence to: {evidence_path}", flush=True)
     print("=" * 80, flush=True)

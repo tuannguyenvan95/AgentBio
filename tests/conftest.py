@@ -86,6 +86,20 @@ class _MockTxResult:
     def __init__(self, return_value):
         self.return_value = return_value
 
+    def transact(self, value=0):
+        return self.return_value
+
+    def __int__(self):
+        return int(self.return_value)
+
+    def __str__(self):
+        return str(self.return_value)
+
+    def __eq__(self, other):
+        if isinstance(other, _MockTxResult):
+            return self.return_value == other.return_value
+        return self.return_value == other
+
 
 class _MockSimContract:
     def __init__(self, sim_client, contract_path, args=None):
@@ -187,6 +201,9 @@ class _MockSimContract:
             "supplemental_evidence_hash": "",
         }
         return _MockTxResult(oid)
+
+    def order_synthesis_designated(self, args, value=0):
+        return self.order_synthesis(args, value=value)
 
     def submit_synthesis_proof(self, args):
         oid = args[0]
@@ -516,3 +533,29 @@ def client():
     except Exception:
         pass
     return _MockSimClient()
+
+
+@pytest.fixture
+def contract(client):
+    return client.deploy("contracts/contract.py")
+
+
+@pytest.fixture
+def researcher(client):
+    return client.accounts[0]
+
+
+@pytest.fixture
+def foundry(client):
+    return client.accounts[1]
+
+
+@pytest.fixture
+def audit_lab(client):
+    return client.accounts[2]
+
+
+@pytest.fixture
+def stranger():
+    return "0x9999999999999999999999999999999999999999"
+

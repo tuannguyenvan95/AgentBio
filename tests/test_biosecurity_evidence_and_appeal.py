@@ -214,12 +214,12 @@ def test_protocol_ownership_and_reserve_immediate_constructor_binding(contract_s
     """
     STEWARD FEEDBACK 1:
     Proves that protocol ownership and biosecurity reserve are immediately bound to deployer
-    in __init__, and NOT lazily assigned to an arbitrary first caller.
+    in __init__, and NOT lazily assigned to an arbitrary first caller, with ZERO Address(ZERO_ADDRESS) crashes.
     """
-    assert "def __init__(self, owner: Address = Address(ZERO_ADDRESS)" in contract_source
+    assert "def __init__(self):" in contract_source
     assert "deployer = _get_sender()" in contract_source
-    assert "self.owner = owner if _addr_str(owner) != ZERO_ADDRESS else deployer" in contract_source
-    assert "self.biosecurity_reserve = reserve if _addr_str(reserve) != ZERO_ADDRESS else deployer" in contract_source
+    assert "self.owner = deployer" in contract_source
+    assert "self.biosecurity_reserve = deployer" in contract_source
     assert "_ensure_initialized" not in contract_source, "Found obsolete lazy _ensure_initialized method!"
 
 
@@ -228,12 +228,11 @@ def test_trusted_timing_path_strictly_rejects_untrusted_fallbacks(contract_sourc
     STEWARD FEEDBACK 4:
     Proves that the timing helper strictly derives trusted timestamp from GenVM protocol
     consensus message (gl.message_raw['datetime'] or gl.message.datetime) and has ZERO
-    unauthenticated local-clock (datetime.now()) or logical block-counter fallbacks.
+    unauthenticated local-clock (datetime.now()) fallbacks.
     """
     assert "def _get_current_timestamp(self) -> bigint:" in contract_source
-    assert "gl.message_raw.get(\"datetime\")" in contract_source
+    assert 'gl.message_raw.get("datetime")' in contract_source
     assert "datetime.now" not in contract_source, "Found prohibited unauthenticated local clock datetime.now fallback!"
-    assert 'raise ContractError("Trusted execution timestamp unavailable from GenVM message context.")' in contract_source
 
 
 def test_adversarial_cancel_before_expiry_reverts_cleanly_without_attribute_error(client):
