@@ -732,3 +732,244 @@ def test_authorized_foundry_registry_governance(client):
     contract.connect(owner).revoke_foundry(args=[new_foundry])
     assert not contract.is_authorized_foundry(args=[new_foundry]).call()
 
+
+def test_designated_target_foundry_cannot_bypass_accreditation_registry(client):
+    """
+    CRITICAL GEN. DAVE CRITIQUE TEST 1:
+    Proves that designating a target_foundry CANNOT bypass the accreditation registry.
+    Unaccredited wallets cannot be designated, and unaccredited wallets cannot claim or submit.
+    """
+    contract = client.deploy("contracts/contract.py")
+    owner = client.accounts[0]
+    researcher = client.accounts[1]
+    unaccredited_wallet = "0x9999999999999999999999999999999999999999"
+    accredited_wallet = client.accounts[2]
+
+    # Attempt to order with unaccredited target foundry -> MUST REVERT
+    with pytest.raises(Exception) as excinfo:
+        contract.connect(researcher).order_synthesis(
+            args=[
+                "Bioremediation enzyme for environmental cleanup",
+                "https://spec.org/enzyme.fasta",
+                86400 * 7,
+                "",
+                unaccredited_wallet
+            ],
+            value=1000000000000000000
+        )
+    assert "accredited" in str(excinfo.value).lower()
+
+    # Owner accredits the foundry in the registry
+    contract.connect(owner).register_foundry(args=[unaccredited_wallet, "LAB-ACCREDITED-GLOBAL-99"])
+    assert contract.is_authorized_foundry(args=[unaccredited_wallet]).call()
+
+    # Now ordering specifying the accredited foundry succeeds
+    tx = contract.connect(researcher).order_synthesis(
+        args=[
+            "Bioremediation enzyme for environmental cleanup",
+            "https://spec.org/enzyme.fasta",
+            86400 * 7,
+            "",
+            unaccredited_wallet
+        ],
+        value=1000000000000000000
+    )
+    oid = tx.return_value
+
+    # Different foundry (even if accredited) cannot claim designated order
+    with pytest.raises(Exception) as excinfo:
+        contract.connect(accredited_wallet).accept_synthesis_agreement(args=[oid])
+    assert "designated" in str(excinfo.value).lower()
+
+    # Designated accredited foundry can accept
+    contract.connect(unaccredited_wallet).accept_synthesis_agreement(args=[oid])
+    o = json.loads(contract.get_order(args=[oid]).call())
+    assert o["status"] == 1
+    assert o["foundry"].lower() == unaccredited_wallet.lower()
+
+
+def test_cryptographic_content_commitment_detects_specification_tampering(client):
+    """
+    CRITICAL GEN. DAVE CRITIQUE TEST 2A:
+    Proves that if commissioned specification content at the URL does not match
+    the immutable cryptographic spec_evidence_hash committed at order creation,
+    adjudication flags content commitment failure and sets SEQUENCE_DEFECTIVE.
+    """
+    contract = client.deploy("contracts/contract.py")
+    researcher = client.accounts[0]
+    foundry = client.accounts[1]
+
+    original_spec_text = ">authentic_target_spec\nATGCATGCATGC"
+    committed_spec_hash = hashlib.sha256(original_spec_text.encode("utf-8")).hexdigest()
+
+    spec_url = "https://research-lab.org/original_design.fasta"
+    qc_url = "https://foundry.org/delivery_qc.txt"
+
+    tx = contract.connect(researcher).order_synthesis(
+        args=[
+            "Therapeutic antibody CDR3 domain",
+            spec_url,
+            86400 * 7,
+            committed_spec_hash
+        ],
+        value=1000000000000000000
+    )
+    oid = tx.return_value
+
+    contract.connect(foundry).submit_synthesis_proof(args=[oid, qc_url])
+
+    # Attacker alters the text at the spec URL after order creation
+    tampered_spec_text = ">tampered_modified_spec\nGGGGGGGGGGGG"
+    client.provider.make_request(
+        method="sim_installMocks",
+        params={
+            "web_mocks": {
+                spec_url: {"status": 200, "body": tampered_spec_text},
+                qc_url: {"status": 200, "body": ">qc\nATGCATGCATGC"}
+            }
+        }
+    )
+
+    contract.connect(researcher).adjudicate_biosecurity_and_qc(args=[oid])
+    o = json.loads(contract.get_order(args=[oid]).call())
+    assert o["status"] == 2
+    assert o["verdict"] == "SEQUENCE_DEFECTIVE"
+    assert "Content commitment verification failed" in o["reason"]
+
+
+def test_cryptographic_content_commitment_detects_qc_tampering(client):
+    """
+    CRITICAL GEN. DAVE CRITIQUE TEST 2B:
+    Proves that if delivered QC report content at the URL does not match
+    the immutable cryptographic qc_evidence_hash submitted by the foundry,
+    adjudication flags content commitment failure and sets SEQUENCE_DEFECTIVE.
+    """
+    contract = client.deploy("contracts/contract.py")
+    researcher = client.accounts[0]
+    foundry = client.accounts[1]
+
+    spec_url = "https://research-lab.org/target.fasta"
+    qc_url = "https://foundry.org/lot_qc.txt"
+
+    spec_text = ">seq\nATGCGATCGATC"
+    spec_hash = hashlib.sha256(spec_text.encode("utf-8")).hexdigest()
+
+    tx = contract.connect(researcher).order_synthesis(
+        args=["Therapeutic antibody CDR3 domain", spec_url, 86400 * 7, spec_hash],
+        value=1000000000000000000
+    )
+    oid = tx.return_value
+
+    authentic_qc_text = ">qc\nATGCGATCGATC_AUTHENTIC"
+    committed_qc_hash = hashlib.sha256(authentic_qc_text.encode("utf-8")).hexdigest()
+
+    # Foundry commits to qc_evidence_hash
+    contract.connect(foundry).submit_synthesis_proof(
+        args=[oid, qc_url, committed_qc_hash]
+    )
+
+    # But web mock serves altered QC text (tampered data)
+    altered_qc_text = ">qc\nATGCGATCGATC_TAMPERED_INJECTED"
+    client.provider.make_request(
+        method="sim_installMocks",
+        params={
+            "web_mocks": {
+                spec_url: {"status": 200, "body": spec_text},
+                qc_url: {"status": 200, "body": altered_qc_text}
+            }
+        }
+    )
+
+    contract.connect(researcher).adjudicate_biosecurity_and_qc(args=[oid])
+    o = json.loads(contract.get_order(args=[oid]).call())
+    assert o["status"] == 2
+    assert o["verdict"] == "SEQUENCE_DEFECTIVE"
+    assert "Content commitment verification failed" in o["reason"]
+
+
+def test_appeal_requires_authenticated_laboratory_provenance_and_hash_integrity(client):
+    """
+    CRITICAL GEN. DAVE CRITIQUE TEST 3:
+    Proves that appeal outcomes require authenticated laboratory provenance
+    from an accredited registry laboratory, and detect tampered supplemental evidence hashes.
+    """
+    contract = client.deploy("contracts/contract.py")
+    owner = client.accounts[0]
+    researcher = client.accounts[1]
+    foundry = client.accounts[2]
+    unaccredited_lab = "0x7777777777777777777777777777777777777777"
+    accredited_audit_lab = "0x6666666666666666666666666666666666666666"
+
+    spec_url = "https://spec.org/dna.fasta"
+    qc_url = "https://foundry.org/qc.txt"
+
+    tx = contract.connect(researcher).order_synthesis(
+        args=["Therapeutic enzyme construct", spec_url, 86400 * 7],
+        value=1000000000000000000
+    )
+    oid = tx.return_value
+    contract.connect(foundry).submit_synthesis_proof(args=[oid, qc_url])
+
+    # Initial adjudication gives BIOHAZARD_BLOCKED
+    client.provider.make_request(
+        method="sim_installMocks",
+        params={
+            "llm_mocks": {
+                ".*": json.dumps({
+                    "canary": "CANARY_AGENT_BIO_SAFETY_V1",
+                    "verdict": "BIOHAZARD_BLOCKED",
+                    "confidence": 98,
+                    "fidelity_score": 10,
+                    "reason": "Suspected toxin similarity"
+                })
+            },
+            "web_mocks": {
+                spec_url: {"status": 200, "body": ">spec\nATGC"},
+                qc_url: {"status": 200, "body": ">qc\nATGC"}
+            }
+        }
+    )
+    contract.connect(researcher).adjudicate_biosecurity_and_qc(args=[oid])
+
+    # Attempt to appeal designating an UNACCREDITED laboratory -> MUST REVERT
+    with pytest.raises(Exception) as excinfo:
+        contract.connect(researcher).appeal_verdict(
+            args=[oid, "Appealing with unaccredited laboratory", unaccredited_lab],
+            value=100000000000000000
+        )
+    assert "accreditation" in str(excinfo.value).lower() or "accredited" in str(excinfo.value).lower()
+
+    # Owner registers independent accredited audit lab
+    contract.connect(owner).register_audit_lab(args=[accredited_audit_lab, "LAB-ISO17025-INDEPENDENT-AUDIT"])
+
+    # Legitimate certified assay hash
+    certified_assay_text = "Certified Independent Mass Spectrometry: Non-Toxic Therapeutic Enzyme"
+    correct_supp_hash = hashlib.sha256(certified_assay_text.encode("utf-8")).hexdigest()
+
+    # Appellant files appeal bound to accredited audit lab & committed hash
+    contract.connect(researcher).appeal_verdict(
+        args=[
+            oid,
+            "Certified independent mass spectrometry confirms non-toxic enzyme",
+            accredited_audit_lab,
+            correct_supp_hash
+        ],
+        value=100000000000000000
+    )
+
+    # Case A: Attacker attempts to provide unauthenticated/tampered supplemental URL
+    client.provider.make_request(
+        method="sim_installMocks",
+        params={
+            "web_mocks": {
+                "https://supp.org/proof.txt": {"status": 200, "body": "TAMPERED_CONTENT_DIFFERS"}
+            }
+        }
+    )
+    contract.connect(researcher).adjudicate_appeal(args=[oid, "https://supp.org/proof.txt"])
+    o = json.loads(contract.get_order(args=[oid]).call())
+    # Tampering detected: appeal dismissed / biohazard confirmed
+    assert o["status"] == 4  # BIOHAZARD_SLASHED
+    assert "verification failed" in o["reason"]
+
+
