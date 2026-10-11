@@ -1,0 +1,18 @@
+{
+  "contract_address": "0x686b45256e00aF90Cdb2112077D16B9D0970b998",
+  "deploy_tx": "0x1e1a36b4d9d3ac21ad972cdf1b56de7fbb870e72981e1d4ec9489a0d2f594d36",
+  "lifecycle_transactions": {
+    "register_foundry": "0xa2f6c423364050cf8881978458b8259dd5b11cc010367fe4b2969802e549b320",
+    "order_synthesis_1": "0x60c60d295cf7d2236b6e075bc71b55bd62f04b98eaa07917295e9071c9f3f5f5",
+    "accept_synthesis_agreement": "0xd67801aa8632941a0f24735b1c4e02236000af151d61b7ce7d2642cd332b14e0",
+    "submit_synthesis_proof": "0xfe78158d6c52ec9c9c14021a5f1e0d8a40cca977267ed583d082ab17e2302a55",
+    "order_synthesis_2": "0xc25571260eb48e8ffa23c4d9182cac538a37fa87a15d3abb5b825a261276d68b"
+  },
+  "stats": {
+    "total_orders": 2,
+    "total_bio_locked": "35000000000000000",
+    "total_orders_settled": 0,
+    "owner": "0xf34587a45c397281ef6bdd839d4a1de2dee393ad",
+    "biosecurity_reserve": "0xf34587a45c397281ef6bdd839d4a1de2dee393ad"
+  }
+}

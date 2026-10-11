@@ -113,6 +113,14 @@ def _get_sender() -> Address:
             return Address(ZERO_ADDRESS)
 
 
+def _is_valid_sha256(h: str) -> bool:
+    """Validate that a string is a genuine 64-character lowercase hex SHA-256 hash."""
+    if not isinstance(h, str):
+        return False
+    h_clean = h.strip().lower()
+    return len(h_clean) == 64 and all(c in "0123456789abcdef" for c in h_clean)
+
+
 @allow_storage
 @dataclass
 class BioOrder:
@@ -286,10 +294,13 @@ class Contract(gl.Contract):
         target_protein_function: str,
         sequence_spec_url: str,
         duration_seconds: int,
-        spec_evidence_hash: str = "",
+        spec_evidence_hash: str,
         target_foundry: Address = Address(ZERO_ADDRESS)
     ) -> u64:
-        """Bio-Researcher commissions a DNA/RNA synthesis escrow with authenticated target design."""
+        """
+        Bio-Researcher commissions a DNA/RNA synthesis escrow with authenticated target design.
+        Enforces genuine 64-hex SHA-256 specification content commitment (no URL string fallback).
+        """
         bounty = bigint(gl.message.value)
         if bounty <= bigint(0):
             raise ContractError("DNA synthesis escrow deposit must be greater than 0 GEN.")
@@ -301,6 +312,10 @@ class Contract(gl.Contract):
         clean_spec = str(sequence_spec_url).strip()
         if not clean_spec.startswith("http://") and not clean_spec.startswith("https://"):
             raise ContractError("Valid public FASTA/GenBank sequence specification URL (http/https) is required.")
+
+        clean_spec_hash = str(spec_evidence_hash).strip().lower()
+        if not _is_valid_sha256(clean_spec_hash):
+            raise ContractError("Valid 64-character hex SHA-256 specification content commitment is required.")
 
         now = self._get_current_timestamp()
         dur = bigint(duration_seconds if duration_seconds > 0 else 604800)
@@ -317,11 +332,6 @@ class Contract(gl.Contract):
         if _addr_str(tf_addr) != ZERO_ADDRESS:
             if not self.authorized_foundries.get(tf_addr, False):
                 raise ContractError("Target foundry must be an accredited foundry registered in the protocol registry.")
-
-        # ── REQUIREMENT 2: IMMUTABLE CONTENT COMMITMENT TO SPECIFICATION ──
-        clean_spec_hash = str(spec_evidence_hash).strip().lower()
-        if not clean_spec_hash or len(clean_spec_hash) != 64:
-            clean_spec_hash = hashlib.sha256(f"{clean_spec}:{clean_fn}".encode("utf-8")).hexdigest()
 
         terms_hash = hashlib.sha256(
             f"{clean_fn}:{clean_spec}:{clean_spec_hash}:{int(bounty)}:{int(expires_at)}:{_addr_str(tf_addr)}".encode("utf-8")
@@ -412,15 +422,12 @@ class Contract(gl.Contract):
         self,
         order_id: u64,
         qc_report_url: str,
-        qc_evidence_hash: str = "",
+        qc_evidence_hash: str,
         lab_attestation_id: str = ""
     ) -> None:
         """
         Foundry submits delivery sequencing QC proof with authenticated lab credentials.
-        Strictly verifies authorized foundry participation:
-        - Sender MUST ALWAYS be an accredited authorized foundry in the registry.
-        - If order is IN_SYNTHESIS, only the agreed authorized foundry can submit.
-        - If order is OPEN, only an authorized/designated foundry can claim and submit.
+        Strictly enforces genuine 64-hex SHA-256 QC report content commitment (no URL string fallback).
         """
         if order_id not in self.orders:
             raise ContractError(f"Bio order {int(order_id)} does not exist.")
@@ -458,15 +465,15 @@ class Contract(gl.Contract):
         if not clean_url.startswith("http://") and not clean_url.startswith("https://"):
             raise ContractError("Valid public sequencing QC report URL (http/https) is required.")
 
-        # ── REQUIREMENT 2 & 3: AUTHENTICATED LABORATORY PROVENANCE FROM REGISTRY ──
+        clean_qc_hash = str(qc_evidence_hash).strip().lower()
+        if not _is_valid_sha256(clean_qc_hash):
+            raise ContractError("Valid 64-character hex SHA-256 QC report content commitment is required.")
+
+        # Authenticated laboratory provenance from on-chain registry
         registered_lab = self.foundry_lab_ids.get(sender, "")
         if not registered_lab:
             registered_lab = f"LAB-ISO17025-{_addr_str(sender)[:8].upper()}"
         clean_lab = registered_lab
-
-        clean_qc_hash = str(qc_evidence_hash).strip().lower()
-        if not clean_qc_hash or len(clean_qc_hash) != 64:
-            clean_qc_hash = hashlib.sha256(clean_url.encode("utf-8")).hexdigest()
 
         self.order_counter = self.order_counter + u64(1)
         o.qc_report_url = clean_url
@@ -479,11 +486,9 @@ class Contract(gl.Contract):
     def adjudicate_biosecurity_and_qc(self, order_id: u64) -> None:
         """
         AI Biosecurity & Quality Jury on GenLayer:
-        Fetches and cryptographically authenticates BOTH:
-        1. Commissioned Target Specification (Researcher Design)
-        2. Delivered Sequencing QC Report (Foundry Production)
-        Enforces immutable content commitment checks against both spec_evidence_hash and qc_evidence_hash.
-        Binds evaluation strictly to authenticated laboratory provenance.
+        1. Separates retrieval failures (network/unreachable) from actual defective-synthesis verdicts.
+        2. Strictly verifies genuine content commitments against retrieved document content (zero fallback).
+        3. Independently enforces the mandatory 80% sequence fidelity threshold in consensus & contract logic.
         """
         if order_id not in self.orders:
             raise ContractError(f"Bio order {int(order_id)} does not exist.")
@@ -512,78 +517,55 @@ class Contract(gl.Contract):
             except Exception:
                 qc_fetch_error = True
 
-            # If commissioned specification cannot be retrieved, we cannot authenticate target
-            if spec_fetch_error or not raw_spec or len(raw_spec.strip()) == 0:
+            # ── REQUIREMENT 2: SEPARATE RETRIEVAL FAILURES FROM DEFECTIVE-SYNTHESIS VERDICTS ──
+            # An unavailable webpage does NOT establish that the foundry delivered incorrect work.
+            if spec_fetch_error or not raw_spec or len(raw_spec.strip()) == 0 or qc_fetch_error or not raw_qc or len(raw_qc.strip()) == 0:
+                missing_party = "commissioned specification" if (spec_fetch_error or not raw_spec) else "sequencing QC report"
                 return {
                     "canary": CANARY_TOKEN,
-                    "verdict": "SEQUENCE_DEFECTIVE",
+                    "verdict": "RETRIEVAL_FAILED",
                     "is_biosecure": False,
-                    "confidence": 100,
+                    "confidence": 0,
                     "fidelity_score": 0,
-                    "reason": "Could not access or authenticate commissioned target sequence specification (URL 404 or unreachable).",
-                    "spec_evidence_hash": "0000000000000000000000000000000000000000000000000000000000000000",
-                    "qc_evidence_hash": "0000000000000000000000000000000000000000000000000000000000000000",
-                    "evidence_hash": "0000000000000000000000000000000000000000000000000000000000000000",
-                    "hash_commitment_verified": False,
-                }
-
-            # If foundry delivery report cannot be retrieved
-            if qc_fetch_error or not raw_qc or len(raw_qc.strip()) == 0:
-                spec_hash = hashlib.sha256(raw_spec.encode("utf-8")).hexdigest()
-                return {
-                    "canary": CANARY_TOKEN,
-                    "verdict": "SEQUENCE_DEFECTIVE",
-                    "is_biosecure": False,
-                    "confidence": 100,
-                    "fidelity_score": 0,
-                    "reason": "Could not access or authenticate foundry sequencing QC report (URL 404 or unreachable).",
-                    "spec_evidence_hash": spec_hash,
-                    "qc_evidence_hash": "0000000000000000000000000000000000000000000000000000000000000000",
-                    "evidence_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+                    "reason": f"Evidence retrieval failure: {missing_party} URL was unreachable or empty. Adjudication aborted without penalty.",
+                    "spec_evidence_hash": "",
+                    "qc_evidence_hash": "",
+                    "evidence_hash": "",
                     "hash_commitment_verified": False,
                 }
 
             spec_hash = hashlib.sha256(raw_spec.encode("utf-8")).hexdigest()
             qc_hash = hashlib.sha256(raw_qc.encode("utf-8")).hexdigest()
 
-            # ── REQUIREMENT 2: VERIFY SPECIFICATION AND QC HASHES AGAINST IMMUTABLE CONTENT COMMITMENTS ──
-            # Check specification hash commitment
-            spec_matches = (spec_hash == o.spec_evidence_hash)
-            if not spec_matches and o.spec_evidence_hash and len(o.spec_evidence_hash) == 64:
-                fallback_spec_hash = hashlib.sha256(f"{o.sequence_spec_url}:{o.target_protein_function}".encode("utf-8")).hexdigest()
-                if o.spec_evidence_hash != fallback_spec_hash:
-                    # Content commitment violated: Tampered sequence specification detected
-                    return {
-                        "canary": CANARY_TOKEN,
-                        "verdict": "SEQUENCE_DEFECTIVE",
-                        "is_biosecure": False,
-                        "confidence": 100,
-                        "fidelity_score": 0,
-                        "reason": f"Content commitment verification failed: Commissioned sequence specification does not match immutable commitment hash {o.spec_evidence_hash[:16]}... Evidence tampered or unverified.",
-                        "spec_evidence_hash": spec_hash,
-                        "qc_evidence_hash": qc_hash,
-                        "evidence_hash": qc_hash,
-                        "hash_commitment_verified": False,
-                    }
+            # ── REQUIREMENT 1: VERIFY SPECIFICATION AND QC HASHES AGAINST IMMUTABLE CONTENT COMMITMENTS ──
+            # Zero fallbacks to URL string hashing: strict content verification
+            if spec_hash != o.spec_evidence_hash:
+                return {
+                    "canary": CANARY_TOKEN,
+                    "verdict": "SEQUENCE_DEFECTIVE",
+                    "is_biosecure": False,
+                    "confidence": 100,
+                    "fidelity_score": 0,
+                    "reason": f"Specification content commitment verification failed (expected {o.spec_evidence_hash[:16]}..., got {spec_hash[:16]}...). Target sequence tampered or unverified.",
+                    "spec_evidence_hash": spec_hash,
+                    "qc_evidence_hash": qc_hash,
+                    "evidence_hash": qc_hash,
+                    "hash_commitment_verified": False,
+                }
 
-            # Check QC hash commitment
-            qc_matches = (qc_hash == o.qc_evidence_hash)
-            if not qc_matches and o.qc_evidence_hash and len(o.qc_evidence_hash) == 64:
-                fallback_qc_hash = hashlib.sha256(o.qc_report_url.encode("utf-8")).hexdigest()
-                if o.qc_evidence_hash != fallback_qc_hash:
-                    # Content commitment violated: Tampered QC report detected
-                    return {
-                        "canary": CANARY_TOKEN,
-                        "verdict": "SEQUENCE_DEFECTIVE",
-                        "is_biosecure": False,
-                        "confidence": 100,
-                        "fidelity_score": 0,
-                        "reason": f"Content commitment verification failed: Delivered sequencing QC does not match foundry's immutable commitment hash {o.qc_evidence_hash[:16]}... Evidence tampered or unverified.",
-                        "spec_evidence_hash": spec_hash,
-                        "qc_evidence_hash": qc_hash,
-                        "evidence_hash": qc_hash,
-                        "hash_commitment_verified": False,
-                    }
+            if qc_hash != o.qc_evidence_hash:
+                return {
+                    "canary": CANARY_TOKEN,
+                    "verdict": "SEQUENCE_DEFECTIVE",
+                    "is_biosecure": False,
+                    "confidence": 100,
+                    "fidelity_score": 0,
+                    "reason": f"QC report content commitment verification failed (expected {o.qc_evidence_hash[:16]}..., got {qc_hash[:16]}...). Delivered sequencing data tampered or unverified.",
+                    "spec_evidence_hash": spec_hash,
+                    "qc_evidence_hash": qc_hash,
+                    "evidence_hash": qc_hash,
+                    "hash_commitment_verified": False,
+                }
 
             truncated_spec = raw_spec[:4000] if len(raw_spec) > 4000 else raw_spec
             truncated_qc = raw_qc[:4000] if len(raw_qc) > 4000 else raw_qc
@@ -668,6 +650,13 @@ Respond ONLY with valid JSON:
             fid = int(parsed.get("fidelity_score", 0))
             is_biosecure = (v_str != "BIOHAZARD_BLOCKED")
 
+            # ── REQUIREMENT 4: DETERMINISTIC INDEPENDENT 80% FIDELITY THRESHOLD ENFORCEMENT ──
+            if is_biosecure:
+                if fid >= 80 and v_str == "BIO_SYNTHESIS_VERIFIED":
+                    v_str = "BIO_SYNTHESIS_VERIFIED"
+                else:
+                    v_str = "SEQUENCE_DEFECTIVE"
+
             return {
                 "canary": CANARY_TOKEN,
                 "verdict": v_str,
@@ -691,6 +680,11 @@ Respond ONLY with valid JSON:
                 return False
 
             mine = leader_fn()
+
+            # Retrieval failure consensus: both must agree that resource is unavailable
+            if leader.get("verdict") == "RETRIEVAL_FAILED" or mine.get("verdict") == "RETRIEVAL_FAILED":
+                return mine.get("verdict") == leader.get("verdict")
+
             if mine["verdict"] != leader["verdict"]:
                 return False
 
@@ -703,11 +697,20 @@ Respond ONLY with valid JSON:
             if leader.get("evidence_hash") != mine.get("evidence_hash"):
                 return False
 
-            # Both validators must independently compute matching evidence hashes
             if mine["spec_evidence_hash"] != leader["spec_evidence_hash"]:
                 return False
             if mine["qc_evidence_hash"] != leader["qc_evidence_hash"]:
                 return False
+
+            # ── REQUIREMENT 4: VALIDATOR AGREEMENT INDEPENDENTLY ENFORCES 80% FIDELITY THRESHOLD ──
+            leader_fid = leader.get("fidelity_score", 0)
+            mine_fid = mine.get("fidelity_score", 0)
+            if leader["verdict"] == "BIO_SYNTHESIS_VERIFIED":
+                if leader_fid < 80 or mine_fid < 80:
+                    return False
+            elif leader["verdict"] == "SEQUENCE_DEFECTIVE" and leader.get("is_biosecure", True):
+                if leader_fid >= 80 and mine_fid >= 80:
+                    return False
 
             # Strict biosecurity agreement: if one flags biohazard, both must agree
             mine_biohazard = (mine["verdict"] == "BIOHAZARD_BLOCKED")
@@ -715,9 +718,6 @@ Respond ONLY with valid JSON:
             if mine_biohazard != leader_biohazard:
                 return False
 
-            # Disallow wild score deviations
-            leader_fid = leader.get("fidelity_score", 0)
-            mine_fid = mine.get("fidelity_score", 0)
             if abs(leader_fid - mine_fid) > 20:
                 return False
 
@@ -725,14 +725,26 @@ Respond ONLY with valid JSON:
 
         adjudication_res = gl.vm.run_nondet(leader_fn, validator_fn)
 
+        # ── REQUIREMENT 2: SEPARATE RETRIEVAL FAILURE (ABORT WITHOUT PENALTY) ──
+        if adjudication_res.get("verdict") == "RETRIEVAL_FAILED":
+            raise ContractError(f"Evidence retrieval failed: {adjudication_res.get('reason')} Adjudication aborted without penalty. Please retry.")
+
+        # ── REQUIREMENT 4: CONTRACT STATE MACHINE ENFORCES 80% FIDELITY ──
+        final_verdict = adjudication_res["verdict"]
+        final_fid = u8(adjudication_res["fidelity_score"])
+        final_reason = adjudication_res["reason"]
+        if final_verdict == "BIO_SYNTHESIS_VERIFIED" and int(final_fid) < 80:
+            final_verdict = "SEQUENCE_DEFECTIVE"
+            final_reason = f"[INDEPENDENT ENFORCEMENT] Synthesis fidelity score ({final_fid}%) is below mandatory 80% fidelity threshold. Overriding verdict to SEQUENCE_DEFECTIVE: {final_reason}"
+
         now = self._get_current_timestamp()
         current_block = self._get_current_block()
 
         self.order_counter = self.order_counter + u64(1)
-        o.verdict = adjudication_res["verdict"]
+        o.verdict = final_verdict
         o.confidence = u8(adjudication_res["confidence"])
-        o.fidelity_score = u8(adjudication_res["fidelity_score"])
-        o.reason = adjudication_res["reason"]
+        o.fidelity_score = final_fid
+        o.reason = final_reason
         o.spec_evidence_hash = adjudication_res["spec_evidence_hash"]
         o.qc_evidence_hash = adjudication_res["qc_evidence_hash"]
         o.evidence_hash = adjudication_res["qc_evidence_hash"]
@@ -747,13 +759,13 @@ Respond ONLY with valid JSON:
         self,
         order_id: u64,
         dispute_reason: str,
-        certifying_lab: Address = Address(ZERO_ADDRESS),
-        supplemental_evidence_hash: str = ""
+        certifying_lab: Address,
+        supplemental_evidence_hash: str
     ) -> None:
         """
         Disputing party stakes a 10% bond during the cooling-off window to challenge the verdict.
         Authorized appellants: ordering Researcher or synthesizing Foundry.
-        Binds appeal to an accredited certifying laboratory and immutable supplemental evidence hash.
+        REQUIREMENT 3: Strictly requires an accredited reviewing laboratory and valid 64-hex SHA-256 evidence commitment.
         """
         if order_id not in self.orders:
             raise ContractError(f"Bio order {int(order_id)} does not exist.")
@@ -782,13 +794,16 @@ Respond ONLY with valid JSON:
         if not clean_reason or len(clean_reason) < 10:
             raise ContractError("Substantive dispute justification (at least 10 characters) is required.")
 
-        # ── REQUIREMENT 3: AUTHENTICATED LABORATORY PROVENANCE IN APPEALS ──
+        # ── REQUIREMENT 3: MANDATORY ACCREDITED REVIEWING LAB & GENUINE SUPPLEMENTAL COMMITMENT ──
         c_lab = _to_address(certifying_lab)
-        if _addr_str(c_lab) != ZERO_ADDRESS:
-            if not self.authorized_foundries.get(c_lab, False):
-                raise ContractError("Certifying laboratory must be registered in the accreditation registry.")
+        if _addr_str(c_lab) == ZERO_ADDRESS:
+            raise ContractError("An accredited reviewing laboratory address is required to lodge an appeal.")
+        if not self.authorized_foundries.get(c_lab, False):
+            raise ContractError("Certifying reviewing laboratory must be registered in the accreditation registry.")
 
         clean_supp_hash = str(supplemental_evidence_hash).strip().lower()
+        if not _is_valid_sha256(clean_supp_hash):
+            raise ContractError("Valid 64-character hex SHA-256 supplemental evidence content commitment is required.")
 
         self.order_counter = self.order_counter + u64(1)
         o.status = STATUS_DISPUTED
@@ -810,10 +825,8 @@ Respond ONLY with valid JSON:
     ) -> None:
         """
         High Appellate Bio-Jury re-evaluates the contested order with supplemental laboratory evidence.
-        Enforces strict authenticated laboratory provenance and cryptographic content commitment verification:
-        - Supplemental evidence must originate from an accredited laboratory in the registry.
-        - Supplemental report content must match the immutable cryptographic hash commitment.
-        - Overturned verdicts recover escrow and refund dispute bonds safely.
+        Enforces strict authenticated laboratory provenance and cryptographic content commitment verification.
+        Separates retrieval failures without penalizing.
         """
         if order_id not in self.orders:
             raise ContractError(f"Bio order {int(order_id)} does not exist.")
@@ -831,17 +844,13 @@ Respond ONLY with valid JSON:
         if _addr_str(c_lab) == ZERO_ADDRESS:
             c_lab = o.appeal_certifying_lab
 
-        if _addr_str(c_lab) != ZERO_ADDRESS:
-            if not self.authorized_foundries.get(c_lab, False):
-                raise ContractError("Unauthorized: Certifying laboratory must be accredited in the protocol registry.")
-            certifying_lab_id = self.foundry_lab_ids.get(c_lab, "LAB-ACCREDITED-AUDITOR")
-        else:
-            if self.authorized_foundries.get(o.foundry, False):
-                certifying_lab_id = self.foundry_lab_ids.get(o.foundry, "LAB-ACCREDITED")
-            else:
-                certifying_lab_id = "LAB-ACCREDITED"
+        if _addr_str(c_lab) == ZERO_ADDRESS or not self.authorized_foundries.get(c_lab, False):
+            raise ContractError("Unauthorized: Appeal must be certified by an accredited reviewing laboratory in the registry.")
+        certifying_lab_id = self.foundry_lab_ids.get(c_lab, "LAB-ACCREDITED-AUDITOR")
 
         expected_supp_hash = str(supplemental_evidence_hash).strip().lower() or o.supplemental_evidence_hash
+        if not _is_valid_sha256(expected_supp_hash):
+            raise ContractError("Valid 64-character hex SHA-256 supplemental evidence content commitment is required.")
 
         appellant = o.dispute_initiator
         initial_verdict = o.verdict
@@ -863,22 +872,22 @@ Respond ONLY with valid JSON:
             except Exception:
                 pass
 
+            # ── REQUIREMENT 2: SEPARATE RETRIEVAL FAILURE ──
             if supp_fetch_error or not raw_supp or len(raw_supp.strip()) == 0:
                 return {
                     "canary": CANARY_TOKEN,
-                    "verdict": "APPEAL_BIOHAZARD_CONFIRMED" if initial_verdict == "BIOHAZARD_BLOCKED" else "APPEAL_DISMISSED",
-                    "reason": "Supplemental QC evidence URL was inaccessible or empty.",
+                    "verdict": "RETRIEVAL_FAILED",
+                    "reason": "Supplemental laboratory evidence URL was inaccessible or empty.",
                 }
 
-            # ── REQUIREMENT 2: VERIFY SUPPLEMENTAL EVIDENCE HASH COMMITMENT ──
+            # ── REQUIREMENT 1 & 3: VERIFY SUPPLEMENTAL EVIDENCE HASH COMMITMENT ──
             computed_supp_hash = hashlib.sha256(raw_supp.encode("utf-8")).hexdigest()
-            if expected_supp_hash and len(expected_supp_hash) == 64:
-                if computed_supp_hash != expected_supp_hash:
-                    return {
-                        "canary": CANARY_TOKEN,
-                        "verdict": "APPEAL_BIOHAZARD_CONFIRMED" if initial_verdict == "BIOHAZARD_BLOCKED" else "APPEAL_DISMISSED",
-                        "reason": f"Supplemental evidence hash verification failed (expected {expected_supp_hash[:16]}..., got {computed_supp_hash[:16]}...). Unauthenticated laboratory provenance.",
-                    }
+            if computed_supp_hash != expected_supp_hash:
+                return {
+                    "canary": CANARY_TOKEN,
+                    "verdict": "APPEAL_DISMISSED",
+                    "reason": f"Supplemental evidence hash verification failed (expected {expected_supp_hash[:16]}..., got {computed_supp_hash[:16]}...). Unauthenticated laboratory provenance.",
+                }
 
             truncated_supp = raw_supp[:4000] if len(raw_supp) > 4000 else raw_supp
             truncated_spec = raw_spec[:4000] if len(raw_spec) > 4000 else raw_spec
@@ -970,6 +979,11 @@ Respond ONLY with valid JSON:
             return mine["verdict"] == leader["verdict"]
 
         appeal_res = gl.vm.run_nondet(leader_fn, validator_fn)
+
+        # ── REQUIREMENT 2: SEPARATE RETRIEVAL FAILURE ──
+        if appeal_res.get("verdict") == "RETRIEVAL_FAILED":
+            raise ContractError(f"Appellate evidence retrieval failed: {appeal_res.get('reason')} Please retry when evidence URL is accessible.")
+
         app_verdict = appeal_res["verdict"]
         app_reason = appeal_res["reason"]
 
@@ -1374,4 +1388,3 @@ Respond ONLY with valid JSON:
     def get_stats(self) -> str:
         """Alias to get_protocol_metrics for backward compatibility."""
         return self.get_protocol_metrics()
-

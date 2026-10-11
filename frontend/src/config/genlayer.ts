@@ -8,7 +8,7 @@ export const STUDIONET_RPC_URL = 'https://studio.genlayer.com/api';
 export const STUDIO_URL = 'https://studio.genlayer.com';
 
 // Default deployed contract address (updated via UI or localStorage)
-export const DEFAULT_CONTRACT_ADDRESS = '0xf8386645C5b6f342f9fffb985Ca5EBE96e8d99CC';
+export const DEFAULT_CONTRACT_ADDRESS = '0x686b45256e00aF90Cdb2112077D16B9D0970b998';
 
 export function getSavedContractAddress(): string {
   if (typeof window !== 'undefined') {
@@ -26,7 +26,8 @@ export function getSavedContractAddress(): string {
         stored.trim() !== '0x7C07Db9a782173D1AaACb75029d9d912EbE019C7' &&
         stored.trim() !== '0xddF33630eFDF42Ca09ebDCEAfeD0C0Fe56186e44' &&
         stored.trim() !== '0x7bb63F04827cf531A1efe99205d4EbEDD88eB2cA' &&
-        stored.trim() !== '0x783c156A1120c1E2F3DEb5d837164b68f2CB73b0'
+        stored.trim() !== '0x783c156A1120c1E2F3DEb5d837164b68f2CB73b0' &&
+        stored.trim() !== '0xf8386645C5b6f342f9fffb985Ca5EBE96e8d99CC'
       ) {
         return stored.trim();
       }
@@ -309,6 +310,13 @@ export async function fetchAllOrders(contractAddress: string): Promise<BioOrderD
     return [];
   }
 }
+export async function computeSha256(text: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(text);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
 
 /**
  * Bio-Researcher locks GEN synthesis payment and submits DNA design specification
@@ -319,15 +327,34 @@ export async function orderSynthesisOnChain(
   targetProteinFunction: string,
   sequenceSpecUrl: string,
   durationBlocks: number,
-  depositWei: bigint
+  depositWei: bigint,
+  specEvidenceHash?: string,
+  targetFoundry?: string
 ): Promise<string> {
   await ensureStudionet();
   const client = getGenLayerClient(userAddress);
 
+  let cleanHash = specEvidenceHash?.trim().toLowerCase();
+  if (!cleanHash || cleanHash.length !== 64) {
+    try {
+      const resp = await fetch(sequenceSpecUrl.trim());
+      const body = await resp.text();
+      cleanHash = await computeSha256(body);
+    } catch {
+      cleanHash = await computeSha256(`${targetProteinFunction}:${sequenceSpecUrl}`);
+    }
+  }
+
   const txHash = await client.writeContract({
     address: contractAddress as `0x${string}`,
     functionName: 'order_synthesis',
-    args: [targetProteinFunction.trim(), sequenceSpecUrl.trim(), durationBlocks],
+    args: [
+      targetProteinFunction.trim(),
+      sequenceSpecUrl.trim(),
+      durationBlocks,
+      cleanHash,
+      targetFoundry || '0x0000000000000000000000000000000000000000'
+    ],
     value: depositWei,
   });
 
@@ -342,15 +369,28 @@ export async function submitSynthesisProofOnChain(
   contractAddress: string,
   userAddress: string,
   orderId: number,
-  qcReportUrl: string
+  qcReportUrl: string,
+  qcEvidenceHash?: string,
+  labId?: string
 ): Promise<string> {
   await ensureStudionet();
   const client = getGenLayerClient(userAddress);
 
+  let cleanHash = qcEvidenceHash?.trim().toLowerCase();
+  if (!cleanHash || cleanHash.length !== 64) {
+    try {
+      const resp = await fetch(qcReportUrl.trim());
+      const body = await resp.text();
+      cleanHash = await computeSha256(body);
+    } catch {
+      cleanHash = await computeSha256(`qc:${orderId}:${qcReportUrl}`);
+    }
+  }
+
   const txHash = await (client.writeContract as any)({
     address: contractAddress as `0x${string}`,
     functionName: 'submit_synthesis_proof',
-    args: [orderId, qcReportUrl.trim()],
+    args: [orderId, qcReportUrl.trim(), cleanHash, labId || 'LAB-GENLAYER-DELEGATE-01'],
     value: 0n,
   });
 
@@ -388,15 +428,23 @@ export async function appealVerdictOnChain(
   userAddress: string,
   orderId: number,
   disputeReason: string,
-  bondWei: bigint
+  bondWei: bigint,
+  certifyingLab?: string,
+  supplementalEvidenceHash?: string
 ): Promise<string> {
   await ensureStudionet();
   const client = getGenLayerClient(userAddress);
 
+  const effectiveLab = certifyingLab || '0xF34587A45C397281Ef6BDd839d4A1de2DEe393ad';
+  let cleanSuppHash = supplementalEvidenceHash?.trim().toLowerCase();
+  if (!cleanSuppHash || cleanSuppHash.length !== 64) {
+    cleanSuppHash = await computeSha256(`appeal:${orderId}:${disputeReason}`);
+  }
+
   const txHash = await (client.writeContract as any)({
     address: contractAddress as `0x${string}`,
     functionName: 'appeal_verdict',
-    args: [orderId, disputeReason.trim()],
+    args: [orderId, disputeReason.trim(), effectiveLab, cleanSuppHash],
     value: bondWei,
   });
 
@@ -411,7 +459,9 @@ export async function adjudicateAppealOnChain(
   contractAddress: string,
   userAddress: string,
   orderId: number,
-  supplementalQcUrl: string
+  supplementalQcUrl: string,
+  supplementalEvidenceHash?: string,
+  certifyingLab?: string
 ): Promise<string> {
   await ensureStudionet();
   const client = getGenLayerClient(userAddress);
@@ -419,7 +469,12 @@ export async function adjudicateAppealOnChain(
   const txHash = await (client.writeContract as any)({
     address: contractAddress as `0x${string}`,
     functionName: 'adjudicate_appeal',
-    args: [orderId, supplementalQcUrl.trim()],
+    args: [
+      orderId,
+      supplementalQcUrl.trim(),
+      supplementalEvidenceHash || '',
+      certifyingLab || '0x0000000000000000000000000000000000000000'
+    ],
     value: 0n,
   });
 

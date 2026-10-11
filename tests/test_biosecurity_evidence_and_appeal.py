@@ -8,30 +8,39 @@ except ImportError:
     pass
 
 
+def _sha256(content: str) -> str:
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
 def test_dual_evidence_authentication_and_biohazard_slash(client):
     """
     Proves that:
-    1. Both commissioned spec AND delivery QC report are fetched and authenticated.
+    1. Both commissioned spec AND delivery QC report are fetched and authenticated via 64-hex content commitments.
     2. Prohibited biohazard pathogens forfeit 100% of escrow to Biosecurity Reserve.
     3. The appeal path CANNOT bypass biohazard forfeiture (both escrow + bond slashed).
     """
     contract = client.deploy("contracts/contract.py")
+    owner = client.accounts[0]
     researcher = client.accounts[0]
     foundry = client.accounts[1]
 
     spec_url = "https://biosecure-archive.org/designs/therapeutic_antibody.fasta"
     qc_url = "https://foundry-qc.io/runs/lot_9921_sanger.txt"
+    spec_body = ">seq1\nATGCGATCGATCGA"
+    qc_body = ">qc1\nATGCGATCGATCGATTCC"
+    spec_hash = _sha256(spec_body)
+    qc_hash = _sha256(qc_body)
 
-    # Step 1: Order Synthesis with authentic design spec
+    # Step 1: Order Synthesis with authentic design spec & genuine 64-hex content commitment
     tx_order = contract.connect(researcher).order_synthesis(
-        args=["Therapeutic neutralizing antibody binding domain", spec_url, 86400 * 7],
+        args=["Therapeutic neutralizing antibody binding domain", spec_url, 86400 * 7, spec_hash],
         value=1000000000000000000  # 1 GEN
     )
     order_id = tx_order.return_value
 
-    # Step 2: Foundry claims and submits QC delivery
+    # Step 2: Foundry claims and submits QC delivery with genuine 64-hex content commitment
     contract.connect(foundry).submit_synthesis_proof(
-        args=[order_id, qc_url]
+        args=[order_id, qc_url, qc_hash]
     )
 
     # Step 3: Mock AI Jury detecting dangerous prohibited select agent toxin
@@ -48,8 +57,8 @@ def test_dual_evidence_authentication_and_biohazard_slash(client):
                 })
             },
             "web_mocks": {
-                spec_url: {"status": 200, "body": ">seq1\nATGCGATCGATCGA"},
-                qc_url: {"status": 200, "body": ">qc1\nATGCGATCGATCGATTCC"}
+                spec_url: {"status": 200, "body": spec_body},
+                qc_url: {"status": 200, "body": qc_body}
             }
         }
     )
@@ -63,9 +72,15 @@ def test_dual_evidence_authentication_and_biohazard_slash(client):
     assert len(order_awaiting["spec_evidence_hash"]) == 64
     assert len(order_awaiting["qc_evidence_hash"]) == 64
 
-    # Step 4: Malicious actor files appeal to attempt bypassing hazardous forfeiture
+    # Step 4: Malicious actor files appeal designating an accredited reviewing lab
+    supp_url = "https://supplemental-lab.org/proof.txt"
+    supp_body = "Supplemental run confirms toxin"
+    supp_hash = _sha256(supp_body)
+    audit_lab = client.accounts[2]
+    contract.connect(owner).register_audit_lab(args=[audit_lab, "LAB-ISO17025-INDEPENDENT"])
+
     contract.connect(researcher).appeal_verdict(
-        args=[order_id, "Attempting to claim false positive classification"],
+        args=[order_id, "Attempting to claim false positive classification", audit_lab, supp_hash],
         value=100000000000000000  # 0.1 GEN bond
     )
 
@@ -81,13 +96,13 @@ def test_dual_evidence_authentication_and_biohazard_slash(client):
                 })
             },
             "web_mocks": {
-                "https://supplemental-lab.org/proof.txt": {"status": 200, "body": "Supplemental run confirms toxin"}
+                supp_url: {"status": 200, "body": supp_body}
             }
         }
     )
 
     contract.connect(researcher).adjudicate_appeal(
-        args=[order_id, "https://supplemental-lab.org/proof.txt"]
+        args=[order_id, supp_url]
     )
 
     final_order = json.loads(contract.get_order(args=[order_id]).call())
@@ -105,22 +120,29 @@ def test_appeal_cannot_bypass_biohazard_even_if_tribunal_claims_verified(client)
     The contract MUST enforce strict, no-bypass forfeiture to the Biosecurity Reserve.
     """
     contract = client.deploy("contracts/contract.py")
+    owner = client.accounts[0]
     researcher = client.accounts[0]
     foundry = client.accounts[1]
+    audit_lab = client.accounts[2]
+    contract.connect(owner).register_audit_lab(args=[audit_lab, "LAB-ISO17025-AUDIT"])
 
     spec_url = "https://biosecure-archive.org/designs/weaponized_toxin.fasta"
     qc_url = "https://foundry-qc.io/runs/lot_adversarial.txt"
+    spec_body = ">biohazard_v1\nATGCGATCGATCGATCGATCGA"
+    qc_body = ">biohazard_v1\nATGCGATCGATCGATCGATCGA"
+    spec_hash = _sha256(spec_body)
+    qc_hash = _sha256(qc_body)
 
     # Step 1: Commission synthesis order
     tx_order = contract.connect(researcher).order_synthesis(
-        args=["Dual-use biological select agent", spec_url, 86400 * 7],
+        args=["Dual-use biological select agent", spec_url, 86400 * 7, spec_hash],
         value=5000000000000000000  # 5 GEN escrow
     )
     order_id = tx_order.return_value
 
     # Step 2: Foundry submits proof
     contract.connect(foundry).submit_synthesis_proof(
-        args=[order_id, qc_url]
+        args=[order_id, qc_url, qc_hash]
     )
 
     # Step 3: Primary adjudication flags BIOHAZARD_BLOCKED
@@ -137,8 +159,8 @@ def test_appeal_cannot_bypass_biohazard_even_if_tribunal_claims_verified(client)
                 })
             },
             "web_mocks": {
-                spec_url: {"status": 200, "body": ">biohazard_v1\nATGCGATCGATCGATCGATCGA"},
-                qc_url: {"status": 200, "body": ">biohazard_v1\nATGCGATCGATCGATCGATCGA"}
+                spec_url: {"status": 200, "body": spec_body},
+                qc_url: {"status": 200, "body": qc_body}
             }
         }
     )
@@ -149,14 +171,16 @@ def test_appeal_cannot_bypass_biohazard_even_if_tribunal_claims_verified(client)
     assert order_flagged["verdict"] == "BIOHAZARD_BLOCKED"
 
     # Step 4: Appellant stakes 10% bond (0.5 GEN) and files an appeal
+    supp_url = "https://adversarial-rebuttal.org/proof.txt"
+    supp_body = "Manipulated lab report"
+    supp_hash = _sha256(supp_body)
+
     contract.connect(researcher).appeal_verdict(
-        args=[order_id, "Frivolous contestation attempting to bypass biosecurity fine"],
+        args=[order_id, "Frivolous contestation attempting to bypass biosecurity fine", audit_lab, supp_hash],
         value=500000000000000000  # 0.5 GEN bond
     )
 
     # Step 5: Adversarial Scenario: Appellate tribunal outputs APPEAL_UPHELD_VERIFIED
-    # Under prior flawed code, this would disburse 5 GEN escrow to foundry.
-    # Under fixed contract, strict no-bypass rule guarantees 100% forfeiture to Reserve!
     client.provider.make_request(
         method="sim_installMocks",
         params={
@@ -168,23 +192,20 @@ def test_appeal_cannot_bypass_biohazard_even_if_tribunal_claims_verified(client)
                 })
             },
             "web_mocks": {
-                "https://adversarial-rebuttal.org/proof.txt": {"status": 200, "body": "Manipulated lab report"}
+                supp_url: {"status": 200, "body": supp_body}
             }
         }
     )
 
     contract.connect(researcher).adjudicate_appeal(
-        args=[order_id, "https://adversarial-rebuttal.org/proof.txt"]
+        args=[order_id, supp_url]
     )
 
     final_order = json.loads(contract.get_order(args=[order_id]).call())
 
     # VERIFY STRICT ENFORCEMENT:
-    # 1. Status is definitively STATUS_BIOHAZARD_SLASHED (4)
     assert final_order["status"] == 4, f"Expected STATUS_BIOHAZARD_SLASHED (4), got {final_order['status']}"
-    # 2. Verdict remains BIOHAZARD_BLOCKED (cannot be overturned to verified)
     assert final_order["verdict"] == "BIOHAZARD_BLOCKED"
-    # 3. Reason explicitly indicates no-bypass forfeiture
     assert "NO-BYPASS BIOHAZARD FORFEITURE" in final_order["reason"]
     assert "forfeited to Reserve" in final_order["reason"]
 
@@ -215,8 +236,6 @@ def test_trusted_timing_path_strictly_rejects_untrusted_fallbacks(contract_sourc
     assert 'raise ContractError("Trusted execution timestamp unavailable from GenVM message context.")' in contract_source
 
 
-# ── Adversarial Tests for Steward zoefunds's Feedback ────────────────────
-
 def test_adversarial_cancel_before_expiry_reverts_cleanly_without_attribute_error(client):
     """
     CRITICAL STEWARD TEST (zoefunds resolution):
@@ -227,10 +246,11 @@ def test_adversarial_cancel_before_expiry_reverts_cleanly_without_attribute_erro
     contract = client.deploy("contracts/contract.py")
     researcher = client.accounts[0]
     spec_url = "https://biosecure-archive.org/designs/valid_spec.fasta"
+    spec_hash = _sha256(">valid\nATCG")
 
     # Order commissioned with 7-day duration (604800s)
     tx = contract.connect(researcher).order_synthesis(
-        args=["Neutralizing peptide targeting microbial surface protein", spec_url, 604800],
+        args=["Neutralizing peptide targeting microbial surface protein", spec_url, 604800, spec_hash],
         value=1000000000000000000
     )
     order_id = tx.return_value
@@ -240,10 +260,8 @@ def test_adversarial_cancel_before_expiry_reverts_cleanly_without_attribute_erro
         contract.connect(researcher).cancel_or_reclaim(args=[order_id])
 
     err_str = str(exc_info.value)
-    # MUST NOT be an AttributeError on genlayer.gl.UserError
     assert "AttributeError" not in err_str, f"Found prohibited runtime crash: {err_str}"
     assert "UserError" not in err_str or "attribute" not in err_str
-    # MUST explicitly enforce expiry
     assert "not yet expired" in err_str.lower() or "cannot cancel" in err_str.lower()
 
 
@@ -256,9 +274,10 @@ def test_adversarial_unauthorized_actor_cancel_reverts(client):
     researcher = client.accounts[0]
     attacker = client.accounts[2]
     spec_url = "https://biosecure-archive.org/designs/valid_spec.fasta"
+    spec_hash = _sha256(">valid\nATCG")
 
     tx = contract.connect(researcher).order_synthesis(
-        args=["Neutralizing peptide targeting microbial surface protein", spec_url, 604800],
+        args=["Neutralizing peptide targeting microbial surface protein", spec_url, 604800, spec_hash],
         value=1000000000000000000
     )
     order_id = tx.return_value
@@ -285,9 +304,10 @@ def test_explicit_bilateral_agreement_verification_and_unauthorized_foundry_reje
     authorized_foundry = client.accounts[1]
     rogue_foundry = client.accounts[2]
     spec_url = "https://biosecure-archive.org/designs/valid_spec.fasta"
+    spec_hash = _sha256(">valid\nATCG")
 
     tx = contract.connect(researcher).order_synthesis(
-        args=["Therapeutic peptide binding domain", spec_url, 604800],
+        args=["Therapeutic peptide binding domain", spec_url, 604800, spec_hash],
         value=2000000000000000000
     )
     order_id = tx.return_value
@@ -310,7 +330,7 @@ def test_explicit_bilateral_agreement_verification_and_unauthorized_foundry_reje
     # 3. Rogue foundry attempts to submit proof on claimed agreement
     with pytest.raises(Exception) as exc_rogue:
         contract.connect(rogue_foundry).submit_synthesis_proof(
-            args=[order_id, "https://rogue-foundry.com/fake_qc.txt"]
+            args=[order_id, "https://rogue-foundry.com/fake_qc.txt", _sha256("fake")]
         )
     assert "unauthorized" in str(exc_rogue.value).lower() or "agreed foundry" in str(exc_rogue.value).lower()
 
@@ -325,20 +345,28 @@ def test_overturned_order_recovery_researcher_appeal(client):
     - Result: 100% of escrow is refunded to Researcher AND Researcher's dispute bond is returned!
     """
     contract = client.deploy("contracts/contract.py")
+    owner = client.accounts[0]
     researcher = client.accounts[0]
     foundry = client.accounts[1]
+    audit_lab = client.accounts[2]
+    contract.connect(owner).register_audit_lab(args=[audit_lab, "LAB-ISO17025-INDEPENDENT"])
+
     spec_url = "https://biosecure-archive.org/designs/enzyme.fasta"
     qc_url = "https://foundry-qc.io/runs/lot_enzyme.txt"
+    spec_body = ">enzyme_spec\nATGCGATCGATCGATC"
+    qc_body = ">enzyme_qc\nATGCGATCGATCGATC"
+    spec_hash = _sha256(spec_body)
+    qc_hash = _sha256(qc_body)
 
     # Step 1: Create order with 1 GEN deposit
     tx = contract.connect(researcher).order_synthesis(
-        args=["Catalytic enzyme for industrial biosynthesis", spec_url, 604800],
+        args=["Catalytic enzyme for industrial biosynthesis", spec_url, 604800, spec_hash],
         value=1000000000000000000
     )
     order_id = tx.return_value
 
     # Step 2: Foundry submits proof
-    contract.connect(foundry).submit_synthesis_proof(args=[order_id, qc_url])
+    contract.connect(foundry).submit_synthesis_proof(args=[order_id, qc_url, qc_hash])
 
     # Step 3: Initial adjudication gives false positive BIO_SYNTHESIS_VERIFIED
     client.provider.make_request(
@@ -354,16 +382,20 @@ def test_overturned_order_recovery_researcher_appeal(client):
                 })
             },
             "web_mocks": {
-                spec_url: {"status": 200, "body": ">enzyme_spec\nATGCGATCGATCGATC"},
-                qc_url: {"status": 200, "body": ">enzyme_qc\nATGCGATCGATCGATC"}
+                spec_url: {"status": 200, "body": spec_body},
+                qc_url: {"status": 200, "body": qc_body}
             }
         }
     )
     contract.connect(researcher).adjudicate_biosecurity_and_qc(args=[order_id])
 
     # Step 4: Researcher stakes 10% bond (0.1 GEN) and appeals with lab proof of defect
+    supp_url = "https://independent-lab.org/hplc.txt"
+    supp_body = "HPLC proof of truncation"
+    supp_hash = _sha256(supp_body)
+
     contract.connect(researcher).appeal_verdict(
-        args=[order_id, "Independent HPLC spectrometry proves sequence truncated at residue 15"],
+        args=[order_id, "Independent HPLC spectrometry proves sequence truncated at residue 15", audit_lab, supp_hash],
         value=100000000000000000
     )
 
@@ -379,12 +411,12 @@ def test_overturned_order_recovery_researcher_appeal(client):
                 })
             },
             "web_mocks": {
-                "https://independent-lab.org/hplc.txt": {"status": 200, "body": "HPLC proof of truncation"}
+                supp_url: {"status": 200, "body": supp_body}
             }
         }
     )
     contract.connect(researcher).adjudicate_appeal(
-        args=[order_id, "https://independent-lab.org/hplc.txt"]
+        args=[order_id, supp_url]
     )
 
     # Step 6: Verify overturned order recovery
@@ -405,9 +437,10 @@ def test_adversarial_in_synthesis_reclaim_before_deadline_reverts(client):
     researcher = client.accounts[0]
     foundry = client.accounts[1]
     spec_url = "https://biosecure-archive.org/designs/valid_spec.fasta"
+    spec_hash = _sha256(">valid\nATCG")
 
     tx = contract.connect(researcher).order_synthesis(
-        args=["Valid biological receptor construct", spec_url, 604800],
+        args=["Valid biological receptor construct", spec_url, 604800, spec_hash],
         value=1000000000000000000
     )
     order_id = tx.return_value
@@ -435,20 +468,28 @@ def test_overturned_order_recovery_foundry_appeal(client):
     - Result: Foundry receives 100% escrow AND gets their dispute bond returned!
     """
     contract = client.deploy("contracts/contract.py")
+    owner = client.accounts[0]
     researcher = client.accounts[0]
     foundry = client.accounts[1]
+    audit_lab = client.accounts[2]
+    contract.connect(owner).register_audit_lab(args=[audit_lab, "LAB-PACBIO-CERTIFIED"])
+
     spec_url = "https://biosecure-archive.org/designs/promoter.fasta"
     qc_url = "https://foundry-qc.io/runs/lot_sanger_noisy.txt"
+    spec_body = ">promoter\nATCGGCTAGCTAGCTA"
+    qc_body = ">promoter\nATCGGCTAGNNNNCTA"
+    spec_hash = _sha256(spec_body)
+    qc_hash = _sha256(qc_body)
 
     # Step 1: Order commissioned
     tx = contract.connect(researcher).order_synthesis(
-        args=["Synthetic mammalian promoter construct", spec_url, 604800],
+        args=["Synthetic mammalian promoter construct", spec_url, 604800, spec_hash],
         value=3000000000000000000
     )
     order_id = tx.return_value
 
     # Step 2: Foundry submits noisy sanger proof
-    contract.connect(foundry).submit_synthesis_proof(args=[order_id, qc_url])
+    contract.connect(foundry).submit_synthesis_proof(args=[order_id, qc_url, qc_hash])
 
     # Step 3: Primary jury renders false negative SEQUENCE_DEFECTIVE due to noisy chromatogram
     client.provider.make_request(
@@ -464,16 +505,20 @@ def test_overturned_order_recovery_foundry_appeal(client):
                 })
             },
             "web_mocks": {
-                spec_url: {"status": 200, "body": ">promoter\nATCGGCTAGCTAGCTA"},
-                qc_url: {"status": 200, "body": ">promoter\nATCGGCTAGNNNNCTA"}
+                spec_url: {"status": 200, "body": spec_body},
+                qc_url: {"status": 200, "body": qc_body}
             }
         }
     )
     contract.connect(researcher).adjudicate_biosecurity_and_qc(args=[order_id])
 
     # Step 4: Foundry appeals with 10% bond (0.3 GEN) and provides PacBio HiFi data
+    supp_url = "https://foundry.com/pacbio_hifi.txt"
+    supp_body = "PacBio HiFi consensus verified"
+    supp_hash = _sha256(supp_body)
+
     contract.connect(foundry).appeal_verdict(
-        args=[order_id, "PacBio HiFi circular consensus sequencing proves 99.9% base accuracy"],
+        args=[order_id, "PacBio HiFi circular consensus sequencing proves 99.9% base accuracy", audit_lab, supp_hash],
         value=300000000000000000
     )
 
@@ -489,12 +534,12 @@ def test_overturned_order_recovery_foundry_appeal(client):
                 })
             },
             "web_mocks": {
-                "https://foundry.com/pacbio_hifi.txt": {"status": 200, "body": "PacBio HiFi consensus verified"}
+                supp_url: {"status": 200, "body": supp_body}
             }
         }
     )
     contract.connect(foundry).adjudicate_appeal(
-        args=[order_id, "https://foundry.com/pacbio_hifi.txt"]
+        args=[order_id, supp_url]
     )
 
     # Step 6: Verify settlement to Foundry and overturned status
@@ -513,17 +558,25 @@ def test_recovery_path_for_abandoned_disputed_order(client):
     to the pre-dispute verdict, preventing locked funds.
     """
     contract = client.deploy("contracts/contract.py")
+    owner = client.accounts[0]
     researcher = client.accounts[0]
     foundry = client.accounts[1]
+    audit_lab = client.accounts[2]
+    contract.connect(owner).register_audit_lab(args=[audit_lab, "LAB-AUDIT-ISO"])
+
     spec_url = "https://biosecure-archive.org/designs/test.fasta"
     qc_url = "https://foundry-qc.io/runs/lot_test.txt"
+    spec_body = "ATCG"
+    qc_body = "ATCG"
+    spec_hash = _sha256(spec_body)
+    qc_hash = _sha256(qc_body)
 
     tx = contract.connect(researcher).order_synthesis(
-        args=["Test expression cassette", spec_url, 604800],
+        args=["Test expression cassette", spec_url, 604800, spec_hash],
         value=1000000000000000000
     )
     order_id = tx.return_value
-    contract.connect(foundry).submit_synthesis_proof(args=[order_id, qc_url])
+    contract.connect(foundry).submit_synthesis_proof(args=[order_id, qc_url, qc_hash])
 
     client.provider.make_request(
         method="sim_installMocks",
@@ -538,16 +591,17 @@ def test_recovery_path_for_abandoned_disputed_order(client):
                 })
             },
             "web_mocks": {
-                spec_url: {"status": 200, "body": "ATCG"},
-                qc_url: {"status": 200, "body": "ATCG"}
+                spec_url: {"status": 200, "body": spec_body},
+                qc_url: {"status": 200, "body": qc_body}
             }
         }
     )
     contract.connect(researcher).adjudicate_biosecurity_and_qc(args=[order_id])
 
     # Researcher disputes
+    supp_hash = _sha256("dispute_evidence")
     contract.connect(researcher).appeal_verdict(
-        args=[order_id, "Frivolous contestation later abandoned"],
+        args=[order_id, "Frivolous contestation later abandoned", audit_lab, supp_hash],
         value=100000000000000000
     )
 
@@ -587,9 +641,10 @@ def test_unauthorized_wallet_cannot_claim_synthesis_order(client):
     contract = client.deploy("contracts/contract.py")
     researcher = client.accounts[0]
     unauthorized_wallet = "0x9999999999999999999999999999999999999999"
+    spec_hash = _sha256(">spec\nATCG")
 
     tx = contract.connect(researcher).order_synthesis(
-        args=["Therapeutic enzyme synthesis", "https://biosecure.org/spec.fasta", 604800],
+        args=["Therapeutic enzyme synthesis", "https://biosecure.org/spec.fasta", 604800, spec_hash],
         value=1000000000000000000
     )
     order_id = tx.return_value
@@ -597,7 +652,7 @@ def test_unauthorized_wallet_cannot_claim_synthesis_order(client):
     # Unauthorized wallet tries to accept synthesis agreement -> REVERT
     with pytest.raises(Exception) as exc:
         contract.connect(unauthorized_wallet).accept_synthesis_agreement(args=[order_id])
-    assert "Unauthorized" in str(exc.value)
+    assert "unauthorized" in str(exc.value).lower()
 
 
 def test_designated_target_foundry_protection_rejects_intruders(client):
@@ -610,6 +665,7 @@ def test_designated_target_foundry_protection_rejects_intruders(client):
     researcher = client.accounts[0]
     designated_foundry = client.accounts[1]
     intruder_foundry = client.accounts[2]
+    spec_hash = _sha256(">spec\nATCG")
 
     # Commission order specifically delegating to designated_foundry
     tx = contract.connect(researcher).order_synthesis(
@@ -617,7 +673,7 @@ def test_designated_target_foundry_protection_rejects_intruders(client):
             "Designated monoclonal antibody synthesis",
             "https://biosecure.org/spec.fasta",
             604800,
-            "",
+            spec_hash,
             designated_foundry
         ],
         value=1000000000000000000
@@ -645,17 +701,25 @@ def test_defensible_appeal_overturns_false_positive_biohazard_protecting_escrow(
     classification (APPEAL_BIOHAZARD_OVERTURNED_BENIGN) and refund the researcher.
     """
     contract = client.deploy("contracts/contract.py")
+    owner = client.accounts[0]
     researcher = client.accounts[0]
     foundry = client.accounts[1]
+    audit_lab = client.accounts[2]
+    contract.connect(owner).register_audit_lab(args=[audit_lab, "LAB-CERTIFIED-ASSAY"])
+
     spec_url = "https://biosecure.org/therapeutic_enzyme.fasta"
     qc_url = "https://foundry-qc.io/run.txt"
+    spec_body = "ATCG"
+    qc_body = "ATCG"
+    spec_hash = _sha256(spec_body)
+    qc_hash = _sha256(qc_body)
 
     tx = contract.connect(researcher).order_synthesis(
-        args=["Benign therapeutic beta-galactosidase", spec_url, 604800],
+        args=["Benign therapeutic beta-galactosidase", spec_url, 604800, spec_hash],
         value=2000000000000000000
     )
     order_id = tx.return_value
-    contract.connect(foundry).submit_synthesis_proof(args=[order_id, qc_url])
+    contract.connect(foundry).submit_synthesis_proof(args=[order_id, qc_url, qc_hash])
 
     # Initial jury falsely flags biohazard (false positive)
     client.provider.make_request(
@@ -671,8 +735,8 @@ def test_defensible_appeal_overturns_false_positive_biohazard_protecting_escrow(
                 })
             },
             "web_mocks": {
-                spec_url: {"status": 200, "body": "ATCG"},
-                qc_url: {"status": 200, "body": "ATCG"}
+                spec_url: {"status": 200, "body": spec_body},
+                qc_url: {"status": 200, "body": qc_body}
             }
         }
     )
@@ -681,8 +745,12 @@ def test_defensible_appeal_overturns_false_positive_biohazard_protecting_escrow(
     assert order_initial["verdict"] == "BIOHAZARD_BLOCKED"
 
     # Researcher appeals with substantive justification & staked bond
+    supp_url = "https://certified-lab.org/attestation.pdf"
+    supp_body = "Certified Non-Toxic Assays"
+    supp_hash = _sha256(supp_body)
+
     contract.connect(researcher).appeal_verdict(
-        args=[order_id, "Legitimate therapeutic protein certified by mass spec assay."],
+        args=[order_id, "Legitimate therapeutic protein certified by mass spec assay.", audit_lab, supp_hash],
         value=200000000000000000
     )
 
@@ -698,11 +766,11 @@ def test_defensible_appeal_overturns_false_positive_biohazard_protecting_escrow(
                 })
             },
             "web_mocks": {
-                "https://certified-lab.org/attestation.pdf": {"status": 200, "body": "Certified Non-Toxic Assays"}
+                supp_url: {"status": 200, "body": supp_body}
             }
         }
     )
-    contract.connect(researcher).adjudicate_appeal(args=[order_id, "https://certified-lab.org/attestation.pdf"])
+    contract.connect(researcher).adjudicate_appeal(args=[order_id, supp_url])
 
     order_final = json.loads(contract.get_order(args=[order_id]).call())
     # Crucial proof: NOT slashed to reserve, but overturned to refund researcher
@@ -744,6 +812,7 @@ def test_designated_target_foundry_cannot_bypass_accreditation_registry(client):
     researcher = client.accounts[1]
     unaccredited_wallet = "0x9999999999999999999999999999999999999999"
     accredited_wallet = client.accounts[2]
+    spec_hash = _sha256(">spec\nATGC")
 
     # Attempt to order with unaccredited target foundry -> MUST REVERT
     with pytest.raises(Exception) as excinfo:
@@ -752,7 +821,7 @@ def test_designated_target_foundry_cannot_bypass_accreditation_registry(client):
                 "Bioremediation enzyme for environmental cleanup",
                 "https://spec.org/enzyme.fasta",
                 86400 * 7,
-                "",
+                spec_hash,
                 unaccredited_wallet
             ],
             value=1000000000000000000
@@ -769,7 +838,7 @@ def test_designated_target_foundry_cannot_bypass_accreditation_registry(client):
             "Bioremediation enzyme for environmental cleanup",
             "https://spec.org/enzyme.fasta",
             86400 * 7,
-            "",
+            spec_hash,
             unaccredited_wallet
         ],
         value=1000000000000000000
@@ -800,10 +869,12 @@ def test_cryptographic_content_commitment_detects_specification_tampering(client
     foundry = client.accounts[1]
 
     original_spec_text = ">authentic_target_spec\nATGCATGCATGC"
-    committed_spec_hash = hashlib.sha256(original_spec_text.encode("utf-8")).hexdigest()
+    committed_spec_hash = _sha256(original_spec_text)
 
     spec_url = "https://research-lab.org/original_design.fasta"
     qc_url = "https://foundry.org/delivery_qc.txt"
+    qc_text = ">qc\nATGCATGCATGC"
+    committed_qc_hash = _sha256(qc_text)
 
     tx = contract.connect(researcher).order_synthesis(
         args=[
@@ -816,7 +887,7 @@ def test_cryptographic_content_commitment_detects_specification_tampering(client
     )
     oid = tx.return_value
 
-    contract.connect(foundry).submit_synthesis_proof(args=[oid, qc_url])
+    contract.connect(foundry).submit_synthesis_proof(args=[oid, qc_url, committed_qc_hash])
 
     # Attacker alters the text at the spec URL after order creation
     tampered_spec_text = ">tampered_modified_spec\nGGGGGGGGGGGG"
@@ -825,7 +896,7 @@ def test_cryptographic_content_commitment_detects_specification_tampering(client
         params={
             "web_mocks": {
                 spec_url: {"status": 200, "body": tampered_spec_text},
-                qc_url: {"status": 200, "body": ">qc\nATGCATGCATGC"}
+                qc_url: {"status": 200, "body": qc_text}
             }
         }
     )
@@ -834,7 +905,7 @@ def test_cryptographic_content_commitment_detects_specification_tampering(client
     o = json.loads(contract.get_order(args=[oid]).call())
     assert o["status"] == 2
     assert o["verdict"] == "SEQUENCE_DEFECTIVE"
-    assert "Content commitment verification failed" in o["reason"]
+    assert "content commitment verification failed" in o["reason"].lower()
 
 
 def test_cryptographic_content_commitment_detects_qc_tampering(client):
@@ -852,7 +923,7 @@ def test_cryptographic_content_commitment_detects_qc_tampering(client):
     qc_url = "https://foundry.org/lot_qc.txt"
 
     spec_text = ">seq\nATGCGATCGATC"
-    spec_hash = hashlib.sha256(spec_text.encode("utf-8")).hexdigest()
+    spec_hash = _sha256(spec_text)
 
     tx = contract.connect(researcher).order_synthesis(
         args=["Therapeutic antibody CDR3 domain", spec_url, 86400 * 7, spec_hash],
@@ -861,7 +932,7 @@ def test_cryptographic_content_commitment_detects_qc_tampering(client):
     oid = tx.return_value
 
     authentic_qc_text = ">qc\nATGCGATCGATC_AUTHENTIC"
-    committed_qc_hash = hashlib.sha256(authentic_qc_text.encode("utf-8")).hexdigest()
+    committed_qc_hash = _sha256(authentic_qc_text)
 
     # Foundry commits to qc_evidence_hash
     contract.connect(foundry).submit_synthesis_proof(
@@ -884,7 +955,7 @@ def test_cryptographic_content_commitment_detects_qc_tampering(client):
     o = json.loads(contract.get_order(args=[oid]).call())
     assert o["status"] == 2
     assert o["verdict"] == "SEQUENCE_DEFECTIVE"
-    assert "Content commitment verification failed" in o["reason"]
+    assert "content commitment verification failed" in o["reason"].lower()
 
 
 def test_appeal_requires_authenticated_laboratory_provenance_and_hash_integrity(client):
@@ -902,13 +973,17 @@ def test_appeal_requires_authenticated_laboratory_provenance_and_hash_integrity(
 
     spec_url = "https://spec.org/dna.fasta"
     qc_url = "https://foundry.org/qc.txt"
+    spec_text = ">spec\nATGC"
+    qc_text = ">qc\nATGC"
+    spec_hash = _sha256(spec_text)
+    qc_hash = _sha256(qc_text)
 
     tx = contract.connect(researcher).order_synthesis(
-        args=["Therapeutic enzyme construct", spec_url, 86400 * 7],
+        args=["Therapeutic enzyme construct", spec_url, 86400 * 7, spec_hash],
         value=1000000000000000000
     )
     oid = tx.return_value
-    contract.connect(foundry).submit_synthesis_proof(args=[oid, qc_url])
+    contract.connect(foundry).submit_synthesis_proof(args=[oid, qc_url, qc_hash])
 
     # Initial adjudication gives BIOHAZARD_BLOCKED
     client.provider.make_request(
@@ -924,27 +999,24 @@ def test_appeal_requires_authenticated_laboratory_provenance_and_hash_integrity(
                 })
             },
             "web_mocks": {
-                spec_url: {"status": 200, "body": ">spec\nATGC"},
-                qc_url: {"status": 200, "body": ">qc\nATGC"}
+                spec_url: {"status": 200, "body": spec_text},
+                qc_url: {"status": 200, "body": qc_text}
             }
         }
     )
     contract.connect(researcher).adjudicate_biosecurity_and_qc(args=[oid])
 
     # Attempt to appeal designating an UNACCREDITED laboratory -> MUST REVERT
+    correct_supp_hash = _sha256("Certified Independent Mass Spectrometry: Non-Toxic Therapeutic Enzyme")
     with pytest.raises(Exception) as excinfo:
         contract.connect(researcher).appeal_verdict(
-            args=[oid, "Appealing with unaccredited laboratory", unaccredited_lab],
+            args=[oid, "Appealing with unaccredited laboratory", unaccredited_lab, correct_supp_hash],
             value=100000000000000000
         )
     assert "accreditation" in str(excinfo.value).lower() or "accredited" in str(excinfo.value).lower()
 
     # Owner registers independent accredited audit lab
     contract.connect(owner).register_audit_lab(args=[accredited_audit_lab, "LAB-ISO17025-INDEPENDENT-AUDIT"])
-
-    # Legitimate certified assay hash
-    certified_assay_text = "Certified Independent Mass Spectrometry: Non-Toxic Therapeutic Enzyme"
-    correct_supp_hash = hashlib.sha256(certified_assay_text.encode("utf-8")).hexdigest()
 
     # Appellant files appeal bound to accredited audit lab & committed hash
     contract.connect(researcher).appeal_verdict(
@@ -973,3 +1045,165 @@ def test_appeal_requires_authenticated_laboratory_provenance_and_hash_integrity(
     assert "verification failed" in o["reason"]
 
 
+def test_retrieval_failure_aborts_without_defective_penalty(client):
+    """
+    CRITICAL STEWARD REQUIREMENT 2:
+    Proves that an unreachable spec or QC report URL (HTTP 404, network timeout, empty body)
+    aborts adjudication via clean revert without penalizing the foundry or marking
+    the order SEQUENCE_DEFECTIVE. The order remains IN_SYNTHESIS so adjudication can be retried.
+    """
+    contract = client.deploy("contracts/contract.py")
+    researcher = client.accounts[0]
+    foundry = client.accounts[1]
+
+    spec_url = "https://server-down.org/target.fasta"
+    qc_url = "https://foundry-qc.io/lot_5521.txt"
+    spec_text = ">seq\nATGCGATCGATC"
+    qc_text = ">qc\nATGCGATCGATC"
+    spec_hash = _sha256(spec_text)
+    qc_hash = _sha256(qc_text)
+
+    tx = contract.connect(researcher).order_synthesis(
+        args=["Valid peptide order", spec_url, 86400 * 7, spec_hash],
+        value=1000000000000000000
+    )
+    oid = tx.return_value
+    contract.connect(foundry).submit_synthesis_proof(args=[oid, qc_url, qc_hash])
+
+    # Case 1: Spec URL is 404
+    client.provider.make_request(
+        method="sim_installMocks",
+        params={
+            "web_mocks": {
+                spec_url: {"status": 404, "body": ""},
+                qc_url: {"status": 200, "body": qc_text}
+            }
+        }
+    )
+    with pytest.raises(Exception) as exc1:
+        contract.connect(researcher).adjudicate_biosecurity_and_qc(args=[oid])
+    err1 = str(exc1.value).lower()
+    assert "retrieval failed" in err1 or "unreachable" in err1
+
+    # Order MUST remain IN_SYNTHESIS (status 1) and NOT marked SEQUENCE_DEFECTIVE
+    o = json.loads(contract.get_order(args=[oid]).call())
+    assert o["status"] == 1
+    assert o["verdict"] != "SEQUENCE_DEFECTIVE"
+
+    # Case 2: QC URL is unreachable / empty
+    client.provider.make_request(
+        method="sim_installMocks",
+        params={
+            "web_mocks": {
+                spec_url: {"status": 200, "body": spec_text},
+                qc_url: {"status": 500, "body": ""}
+            }
+        }
+    )
+    with pytest.raises(Exception) as exc2:
+        contract.connect(researcher).adjudicate_biosecurity_and_qc(args=[oid])
+    err2 = str(exc2.value).lower()
+    assert "retrieval failed" in err2 or "unreachable" in err2
+
+    # Order remains intact for retry
+    o2 = json.loads(contract.get_order(args=[oid]).call())
+    assert o2["status"] == 1
+    assert o2["verdict"] != "SEQUENCE_DEFECTIVE"
+
+
+def test_independent_eighty_percent_fidelity_enforcement(client):
+    """
+    CRITICAL STEWARD REQUIREMENT 4:
+    Proves that independent validator and contract logic strictly enforces that
+    fidelity < 80% CAN NEVER yield BIO_SYNTHESIS_VERIFIED, even if a compromised
+    or hallucinating LLM jury returns BIO_SYNTHESIS_VERIFIED.
+    """
+    contract = client.deploy("contracts/contract.py")
+    researcher = client.accounts[0]
+    foundry = client.accounts[1]
+
+    spec_url = "https://biosecure.org/target.fasta"
+    qc_url = "https://foundry.org/qc.txt"
+    spec_text = ">seq\nATGCGATCGATC"
+    qc_text = ">qc\nATGCGATCGATC"
+    spec_hash = _sha256(spec_text)
+    qc_hash = _sha256(qc_text)
+
+    tx = contract.connect(researcher).order_synthesis(
+        args=["Therapeutic enzyme", spec_url, 86400 * 7, spec_hash],
+        value=1000000000000000000
+    )
+    oid = tx.return_value
+    contract.connect(foundry).submit_synthesis_proof(args=[oid, qc_url, qc_hash])
+
+    # Hallucinating LLM returns BIO_SYNTHESIS_VERIFIED but low fidelity 72% (< 80%)
+    client.provider.make_request(
+        method="sim_installMocks",
+        params={
+            "llm_mocks": {
+                ".*": json.dumps({
+                    "canary": "CANARY_AGENT_BIO_SAFETY_V1",
+                    "verdict": "BIO_SYNTHESIS_VERIFIED",
+                    "confidence": 95,
+                    "fidelity_score": 72,
+                    "reason": "Hallucinating prompt claiming verified despite 72% alignment."
+                })
+            },
+            "web_mocks": {
+                spec_url: {"status": 200, "body": spec_text},
+                qc_url: {"status": 200, "body": qc_text}
+            }
+        }
+    )
+
+    contract.connect(researcher).adjudicate_biosecurity_and_qc(args=[oid])
+    o = json.loads(contract.get_order(args=[oid]).call())
+
+    # Contract state logic MUST override to SEQUENCE_DEFECTIVE
+    assert o["verdict"] == "SEQUENCE_DEFECTIVE"
+    assert o["fidelity_score"] == 72
+    assert "80% fidelity threshold" in o["reason"]
+
+
+def test_strict_content_commitments_reject_invalid_hashes(client):
+    """
+    CRITICAL STEWARD REQUIREMENT 1:
+    Proves that order_synthesis and submit_synthesis_proof strictly reject
+    missing, short, non-hex, or malformed hashes with zero fallback to URL hashing.
+    """
+    contract = client.deploy("contracts/contract.py")
+    researcher = client.accounts[0]
+    foundry = client.accounts[1]
+
+    spec_url = "https://biosecure.org/spec.fasta"
+
+    # 1. Missing spec hash -> REVERTS
+    with pytest.raises(Exception) as exc1:
+        contract.connect(researcher).order_synthesis(
+            args=["Therapeutic peptide", spec_url, 86400 * 7, ""],
+            value=1000000000000000000
+        )
+    assert "valid 64-character hex" in str(exc1.value).lower()
+
+    # 2. Too short spec hash -> REVERTS
+    with pytest.raises(Exception) as exc2:
+        contract.connect(researcher).order_synthesis(
+            args=["Therapeutic peptide", spec_url, 86400 * 7, "abc123short"],
+            value=1000000000000000000
+        )
+    assert "valid 64-character hex" in str(exc2.value).lower()
+
+    # 3. Valid spec hash succeeds
+    valid_spec_hash = _sha256(">spec\nATGC")
+    tx = contract.connect(researcher).order_synthesis(
+        args=["Therapeutic peptide", spec_url, 86400 * 7, valid_spec_hash],
+        value=1000000000000000000
+    )
+    oid = tx.return_value
+
+    # 4. Invalid QC hash -> REVERTS
+    with pytest.raises(Exception) as exc3:
+        contract.connect(foundry).submit_synthesis_proof(
+            args=[oid, "https://foundry.org/qc.txt", "not_a_valid_hash_123"]
+        )
+    assert "valid 64-character hex" in str(exc3.value).lower()

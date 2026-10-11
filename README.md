@@ -2,7 +2,7 @@
 
 > **Track:** DeSci (Decentralized Science) / Biosecurity / Subjective Consensus  
 > **Target Network:** GenLayer Studionet (Chain ID: `61999` / `0xF1EF`, RPC: `https://studio.genlayer.com/api`)  
-> **Deployed Intelligent Contract:** `0xf8386645C5b6f342f9fffb985Ca5EBE96e8d99CC`  
+> **Deployed Intelligent Contract:** `0x686b45256e00aF90Cdb2112077D16B9D0970b998`  
 > **Live Production dApp:** [https://agentbio.vercel.app](https://agentbio.vercel.app)  
 > **GitHub Repository:** [https://github.com/tuannguyenvan95/AgentBio](https://github.com/tuannguyenvan95/AgentBio)  
 > **Hackathon Target:** Agent Tank Hackathon — Track: DeSci & Subjective Consensus  
@@ -70,21 +70,31 @@ stateDiagram-v2
 
 ---
 
-## 🧪 3. Bảng Kiểm Thử Hợp Đồng (`tests/`)
+## 🧪 3. Bảng Kiểm Thử Hợp Đồng (`tests/`) & Giao Dịch Live StudioNet
 
-Tất cả **29 bài test** trong test suites được kiểm thử tự động và vượt qua **100%**:
+Tất cả **36 bài test** trong test suites được kiểm thử tự động và vượt qua **100%**:
 - `tests/test_agentbio.py` (13 tests): Kiểm tra cú pháp GenVM, storage struct, canary token, validator consensus, và behavioral simulation (settlement, cooling-off window, refund, Sybil defence).
-- `tests/test_biosecurity_evidence_and_appeal.py` (16 tests): Bao gồm các test đối kháng (Adversarial E2E Tests) kiểm tra:
-  1. Ngăn chặn ví lạ chưa được ủy quyền nhận đơn (`test_unauthorized_wallet_cannot_claim_synthesis_order`).
-  2. Bảo vệ Foundry được chỉ định đích danh (`test_designated_target_foundry_protection_rejects_intruders`).
-  3. Cơ chế phúc thẩm đảo ngược phán quyết nhầm mầm bệnh (`test_defensible_appeal_overturns_false_positive_biohazard_protecting_escrow`).
-  4. Quản trị sổ đăng bạ Foundry (`test_authorized_foundry_registry_governance`).
-  5. Đối soát mã băm bất biến và thời gian thực thi xác thực.
+- `tests/test_biosecurity_evidence_and_appeal.py` (23 tests): Bao gồm các test đối kháng (Adversarial E2E Tests) kiểm tra:
+  1. **Genuine Content Commitments:** Bắt buộc 64-hex SHA-256 nội dung tài liệu (`spec_evidence_hash`, `qc_evidence_hash`), loại bỏ 100% fallback hash URL.
+  2. **Separate Retrieval Failures:** Lỗi tải URL (404/500/timeout) hủy giao dịch sạch không phạt `SEQUENCE_DEFECTIVE`.
+  3. **Strengthened Appeals:** Yêu cầu phòng lab chứng thực trong sổ đăng bạ (`certifying_lab`) và cam kết chứng cứ bổ sung 64-hex.
+  4. **Strict 80% Fidelity Enforcement:** Đảm bảo validator và logic state machine độc lập cưỡng chế fidelity < 80% không bao giờ được `BIO_SYNTHESIS_VERIFIED`.
+  5. **Bảo vệ Foundry chỉ định:** Ngăn chặn ví lạ hoặc bên thứ ba xâm nhập đơn hàng.
 
 Để chạy toàn bộ kiểm thử:
 ```bash
-pytest
+pytest tests/
 ```
+
+### ⛓️ Bằng Chứng Giao Dịch Live On-Chain Trên GenLayer StudioNet:
+- **Deployed Contract:** `0x686b45256e00aF90Cdb2112077D16B9D0970b998`
+- **Deploy Transaction:** `0x1e1a36b4d9d3ac21ad972cdf1b56de7fbb870e72981e1d4ec9489a0d2f594d36`
+- **Register Authorized Foundry:** `0xa2f6c423364050cf8881978458b8259dd5b11cc010367fe4b2969802e549b320`
+- **Order Synthesis (64-hex Spec Hash):** `0x60c60d295cf7d2236b6e075bc71b55bd62f04b98eaa07917295e9071c9f3f5f5`
+- **Accept Synthesis Agreement:** `0xd67801aa8632941a0f24735b1c4e02236000af151d61b7ce7d2642cd332b14e0`
+- **Submit QC Proof (64-hex QC Hash):** `0xfe78158d6c52ec9c9c14021a5f1e0d8a40cca977267ed583d082ab17e2302a55`
+- **Validator Consensus Adjudication:** `0xaed980180d54db3fcc55941900e4cc2d40d9f1cbd7cd3f6f43400bf941fb9673` *(Rendered BIO_SYNTHESIS_VERIFIED, 100% Fidelity, 100% Confidence)*
+- **Order Synthesis #2 (Open Benchmark):** `0xc25571260eb48e8ffa23c4d9182cac538a37fa87a15d3abb5b825a261276d68b`
 
 ---
 

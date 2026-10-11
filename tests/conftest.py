@@ -155,12 +155,13 @@ class _MockSimContract:
         spec_hash = args[3] if len(args) > 3 and args[3] else ""
         target_foundry = args[4] if len(args) > 4 and args[4] else "0x0000000000000000000000000000000000000000"
 
+        clean_spec_hash = str(spec_hash).strip().lower()
+        if not clean_spec_hash or len(clean_spec_hash) != 64:
+            raise ValueError("Valid 64-character hex SHA-256 specification content commitment is required.")
+
         if str(target_foundry) != "0x0000000000000000000000000000000000000000":
             if not self.authorized_foundries.get(str(target_foundry).lower(), False):
                 raise ValueError("Target foundry must be an accredited foundry registered in the protocol registry.")
-
-        if not spec_hash:
-            spec_hash = hashlib.sha256(f"{spec_url}:{target_fn}".encode("utf-8")).hexdigest()
 
         self.orders[oid] = {
             "order_id": oid,
@@ -172,7 +173,7 @@ class _MockSimContract:
             "dispute_bond": "0",
             "target_protein_function": target_fn,
             "sequence_spec_url": spec_url,
-            "spec_evidence_hash": spec_hash,
+            "spec_evidence_hash": clean_spec_hash,
             "qc_report_url": "",
             "qc_evidence_hash": "",
             "evidence_hash": "",
@@ -198,6 +199,10 @@ class _MockSimContract:
         if not self.authorized_foundries.get(self.caller.lower(), False):
             raise ValueError("Unauthorized: Only accredited authorized foundries can submit synthesis proof.")
 
+        clean_qc_hash = str(qc_hash).strip().lower()
+        if not clean_qc_hash or len(clean_qc_hash) != 64:
+            raise ValueError("Valid 64-character hex SHA-256 QC report content commitment is required.")
+
         if o["status"] == 1:
             if o.get("foundry") and self.caller.lower() != o["foundry"].lower():
                 raise ValueError("Unauthorized: Only the agreed foundry can submit synthesis proof.")
@@ -214,14 +219,12 @@ class _MockSimContract:
         else:
             raise ValueError(f"Bio order is not open for submission in status {o['status']}.")
 
-        if not qc_hash:
-            qc_hash = hashlib.sha256(qc_url.encode("utf-8")).hexdigest()
         registered_lab = self.foundry_lab_ids.get(self.caller.lower(), "LAB-ACCREDITED")
         lab_id = registered_lab
 
         o["qc_report_url"] = qc_url
-        o["qc_evidence_hash"] = qc_hash
-        o["evidence_hash"] = qc_hash
+        o["qc_evidence_hash"] = clean_qc_hash
+        o["evidence_hash"] = clean_qc_hash
         o["lab_attestation_id"] = lab_id
         o["reason"] = f"Sequencing QC report submitted by accredited laboratory ({lab_id})."
         return _MockTxResult(None)
@@ -232,32 +235,37 @@ class _MockSimContract:
         web_mocks = self.client.provider.web_mocks
         llm_mocks = self.client.provider.llm_mocks
 
-        spec_raw = web_mocks.get(order["sequence_spec_url"], {}).get("body", "default_spec")
-        qc_raw = web_mocks.get(order["qc_report_url"], {}).get("body", "default_qc")
+        spec_data = web_mocks.get(order["sequence_spec_url"])
+        qc_data = web_mocks.get(order["qc_report_url"])
+
+        # REQUIREMENT 2: SEPARATE RETRIEVAL FAILURES (NO FALSE DEFECT PENALTY)
+        if not spec_data or spec_data.get("status", 200) != 200 or not spec_data.get("body"):
+            raise ValueError("Evidence retrieval failed: commissioned specification URL was unreachable or empty. Adjudication aborted without penalty. Please retry.")
+        if not qc_data or qc_data.get("status", 200) != 200 or not qc_data.get("body"):
+            raise ValueError("Evidence retrieval failed: sequencing QC report URL was unreachable or empty. Adjudication aborted without penalty. Please retry.")
+
+        spec_raw = spec_data["body"]
+        qc_raw = qc_data["body"]
 
         spec_hash = hashlib.sha256(spec_raw.encode("utf-8")).hexdigest()
         qc_hash = hashlib.sha256(qc_raw.encode("utf-8")).hexdigest()
 
-        # Check content commitments
-        if order.get("spec_evidence_hash") and len(order["spec_evidence_hash"]) == 64:
-            fallback_spec = hashlib.sha256(f"{order['sequence_spec_url']}:{order['target_protein_function']}".encode("utf-8")).hexdigest()
-            if spec_hash != order["spec_evidence_hash"] and order["spec_evidence_hash"] != fallback_spec:
-                order["verdict"] = "SEQUENCE_DEFECTIVE"
-                order["reason"] = f"Content commitment verification failed: Commissioned sequence specification does not match immutable commitment hash {order['spec_evidence_hash'][:16]}... Evidence tampered."
-                order["confidence"] = 100
-                order["fidelity_score"] = 0
-                order["status"] = 2
-                return _MockTxResult(None)
+        # REQUIREMENT 1: VERIFY STRICT CONTENT COMMITMENTS (ZERO FALLBACK)
+        if spec_hash != order["spec_evidence_hash"]:
+            order["verdict"] = "SEQUENCE_DEFECTIVE"
+            order["reason"] = f"Specification content commitment verification failed (expected {order['spec_evidence_hash'][:16]}..., got {spec_hash[:16]}...). Evidence tampered."
+            order["confidence"] = 100
+            order["fidelity_score"] = 0
+            order["status"] = 2
+            return _MockTxResult(None)
 
-        if order.get("qc_evidence_hash") and len(order["qc_evidence_hash"]) == 64:
-            fallback_qc = hashlib.sha256(order["qc_report_url"].encode("utf-8")).hexdigest()
-            if qc_hash != order["qc_evidence_hash"] and order["qc_evidence_hash"] != fallback_qc:
-                order["verdict"] = "SEQUENCE_DEFECTIVE"
-                order["reason"] = f"Content commitment verification failed: Delivered sequencing QC does not match foundry's immutable commitment hash {order['qc_evidence_hash'][:16]}... Evidence tampered."
-                order["confidence"] = 100
-                order["fidelity_score"] = 0
-                order["status"] = 2
-                return _MockTxResult(None)
+        if qc_hash != order["qc_evidence_hash"]:
+            order["verdict"] = "SEQUENCE_DEFECTIVE"
+            order["reason"] = f"QC report content commitment verification failed (expected {order['qc_evidence_hash'][:16]}..., got {qc_hash[:16]}...). Evidence tampered."
+            order["confidence"] = 100
+            order["fidelity_score"] = 0
+            order["status"] = 2
+            return _MockTxResult(None)
 
         order["spec_evidence_hash"] = spec_hash
         order["qc_evidence_hash"] = qc_hash
@@ -276,6 +284,15 @@ class _MockSimContract:
                 fidelity = parsed.get("fidelity_score", fidelity)
                 break
 
+        # REQUIREMENT 4: INDEPENDENT 80% FIDELITY THRESHOLD ENFORCEMENT
+        if verdict != "BIOHAZARD_BLOCKED":
+            if fidelity >= 80 and verdict == "BIO_SYNTHESIS_VERIFIED":
+                verdict = "BIO_SYNTHESIS_VERIFIED"
+            else:
+                verdict = "SEQUENCE_DEFECTIVE"
+                if fidelity < 80:
+                    reason = f"[INDEPENDENT ENFORCEMENT] Synthesis fidelity score ({fidelity}%) is below mandatory 80% fidelity threshold. Overriding verdict to SEQUENCE_DEFECTIVE: {reason}"
+
         order["verdict"] = verdict
         order["reason"] = reason
         order["confidence"] = confidence
@@ -288,14 +305,22 @@ class _MockSimContract:
         justification = args[1]
         cert_lab = args[2] if len(args) > 2 and args[2] else "0x0000000000000000000000000000000000000000"
         supp_hash = args[3] if len(args) > 3 and args[3] else ""
-        if cert_lab and str(cert_lab) != "0x0000000000000000000000000000000000000000":
-            if not self.authorized_foundries.get(str(cert_lab).lower(), False):
-                raise ValueError("Certifying laboratory must be registered in the accreditation registry.")
+
+        # REQUIREMENT 3: MANDATORY ACCREDITED LAB & 64-HEX COMMITMENT
+        if not cert_lab or str(cert_lab) == "0x0000000000000000000000000000000000000000":
+            raise ValueError("An accredited reviewing laboratory address is required to lodge an appeal.")
+        if not self.authorized_foundries.get(str(cert_lab).lower(), False):
+            raise ValueError("Certifying reviewing laboratory must be registered in the accreditation registry.")
+
+        clean_supp = str(supp_hash).strip().lower()
+        if not clean_supp or len(clean_supp) != 64:
+            raise ValueError("Valid 64-character hex SHA-256 supplemental evidence content commitment is required.")
+
         self.orders[oid]["status"] = 7  # DISPUTED
         self.orders[oid]["dispute_bond"] = str(value)
         self.orders[oid]["dispute_initiator"] = self.caller
         self.orders[oid]["appeal_certifying_lab"] = str(cert_lab)
-        self.orders[oid]["supplemental_evidence_hash"] = str(supp_hash)
+        self.orders[oid]["supplemental_evidence_hash"] = clean_supp
         return _MockTxResult(None)
 
     def adjudicate_appeal(self, args):
@@ -305,15 +330,21 @@ class _MockSimContract:
         cert_lab = args[3] if len(args) > 3 and args[3] else "0x0000000000000000000000000000000000000000"
         order = self.orders[oid]
 
-        if cert_lab and str(cert_lab) != "0x0000000000000000000000000000000000000000":
-            if not self.authorized_foundries.get(str(cert_lab).lower(), False):
-                raise ValueError("Unauthorized: Certifying laboratory must be accredited in the protocol registry.")
+        effective_lab = cert_lab if (cert_lab and str(cert_lab) != "0x0000000000000000000000000000000000000000") else order.get("appeal_certifying_lab")
+        if not effective_lab or str(effective_lab) == "0x0000000000000000000000000000000000000000" or not self.authorized_foundries.get(str(effective_lab).lower(), False):
+            raise ValueError("Unauthorized: Appeal must be certified by an accredited reviewing laboratory in the registry.")
 
         web_mocks = self.client.provider.web_mocks
-        raw_supp = web_mocks.get(supplemental_url, {}).get("body", "default_supp")
+        supp_data = web_mocks.get(supplemental_url)
+
+        # REQUIREMENT 2: SEPARATE RETRIEVAL FAILURES
+        if not supp_data or supp_data.get("status", 200) != 200 or not supp_data.get("body"):
+            raise ValueError("Appellate evidence retrieval failed: Supplemental laboratory evidence URL was inaccessible or empty. Please retry.")
+
+        raw_supp = supp_data["body"]
         computed_supp = hashlib.sha256(raw_supp.encode("utf-8")).hexdigest()
         expected_hash = supp_hash or order.get("supplemental_evidence_hash", "")
-        if expected_hash and len(expected_hash) == 64 and computed_supp != expected_hash:
+        if computed_supp != expected_hash:
             order["status"] = 4 if order["verdict"] == "BIOHAZARD_BLOCKED" else 5
             order["reason"] = f"Supplemental evidence hash verification failed (expected {expected_hash[:16]}..., got {computed_supp[:16]}...). Unauthenticated laboratory provenance."
             return _MockTxResult(None)
