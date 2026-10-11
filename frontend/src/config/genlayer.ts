@@ -8,7 +8,7 @@ export const STUDIONET_RPC_URL = 'https://studio.genlayer.com/api';
 export const STUDIO_URL = 'https://studio.genlayer.com';
 
 // Default deployed contract address (updated via UI or localStorage)
-export const DEFAULT_CONTRACT_ADDRESS = '0x783c156A1120c1E2F3DEb5d837164b68f2CB73b0';
+export const DEFAULT_CONTRACT_ADDRESS = '0xf8386645C5b6f342f9fffb985Ca5EBE96e8d99CC';
 
 export function getSavedContractAddress(): string {
   if (typeof window !== 'undefined') {
@@ -25,7 +25,8 @@ export function getSavedContractAddress(): string {
         stored.trim() !== '0x58E439f80483B72FfAB6704dDB5d447439986549' &&
         stored.trim() !== '0x7C07Db9a782173D1AaACb75029d9d912EbE019C7' &&
         stored.trim() !== '0xddF33630eFDF42Ca09ebDCEAfeD0C0Fe56186e44' &&
-        stored.trim() !== '0x7bb63F04827cf531A1efe99205d4EbEDD88eB2cA'
+        stored.trim() !== '0x7bb63F04827cf531A1efe99205d4EbEDD88eB2cA' &&
+        stored.trim() !== '0x783c156A1120c1E2F3DEb5d837164b68f2CB73b0'
       ) {
         return stored.trim();
       }
