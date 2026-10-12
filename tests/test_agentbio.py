@@ -71,10 +71,11 @@ def test_canary_and_consensus_rules(contract_source):
 
 
 def test_native_transfer_calls(contract_source):
-    """Ensure payouts, penalties, and refunds use gl.get_contract_at(...).emit_transfer."""
-    assert "gl.get_contract_at(o.foundry).emit_transfer" in contract_source
-    assert "gl.get_contract_at(self.biosecurity_reserve).emit_transfer" in contract_source
-    assert "gl.get_contract_at(o.researcher).emit_transfer" in contract_source
+    """Ensure payouts, penalties, and refunds use safe native transfer with recovery pattern."""
+    assert "self._safe_transfer" in contract_source
+    assert "gl.get_contract_at(recipient).emit_transfer" in contract_source
+    assert "claimable_balances" in contract_source
+    assert "claim_payout" in contract_source
 
 
 # ── Behavioral Simulation Test Harness ─────────────────────────────────

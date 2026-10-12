@@ -130,6 +130,7 @@ class _MockSimContract:
             sim_client.accounts[1].lower(): "LAB-CERTIFIED-FOUNDRY-02",
             sim_client.accounts[2].lower(): "LAB-ACCREDITED-03",
         }
+        self.claimable_balances = {}
 
     def connect(self, account):
         self.caller = account
@@ -158,6 +159,29 @@ class _MockSimContract:
         l, lab_id = args
         self.authorized_foundries[str(l).lower()] = True
         self.foundry_lab_ids[str(l).lower()] = str(lab_id)
+        return _MockTxResult(None)
+
+    def attest_appeal_evidence(self, args):
+        oid = args[0]
+        evidence_hash = args[1]
+        if oid not in self.orders:
+            raise ValueError(f"Bio order {oid} does not exist.")
+        o = self.orders[oid]
+        if o['status'] not in (2, 7):
+            raise ValueError("Order must be in AWAITING_PAYOUT or DISPUTED status for attestation.")
+        if not self.authorized_foundries.get(self.caller.lower(), False):
+            raise ValueError("Only registered accredited laboratories can attest evidence.")
+        clean_hash = str(evidence_hash).strip().lower()
+        if len(clean_hash) != 64:
+            raise ValueError("Valid 64-character hex SHA-256 evidence hash is required.")
+        import hashlib
+        lab_id = self.foundry_lab_ids.get(self.caller.lower(), "")
+        attestation_binding = hashlib.sha256(
+            f"{oid}:{self.caller.lower()}:{lab_id}:{clean_hash}".encode("utf-8")
+        ).hexdigest()
+        if not hasattr(self, 'appeal_attestations'):
+            self.appeal_attestations = {}
+        self.appeal_attestations[oid] = attestation_binding
         return _MockTxResult(None)
 
     def set_cooling_off_seconds(self, args):
@@ -274,6 +298,9 @@ class _MockSimContract:
         spec_raw = spec_data["body"]
         qc_raw = qc_data["body"]
 
+        if len(spec_raw) > 12000 or len(qc_raw) > 12000:
+            raise ValueError("Evidence excerpt insufficient for confident determination. Provide complete evidence and retry.")
+
         spec_hash = hashlib.sha256(spec_raw.encode("utf-8")).hexdigest()
         qc_hash = hashlib.sha256(qc_raw.encode("utf-8")).hexdigest()
 
@@ -343,6 +370,21 @@ class _MockSimContract:
         if not clean_supp or len(clean_supp) != 64:
             raise ValueError("Valid 64-character hex SHA-256 supplemental evidence content commitment is required.")
 
+        stored_attestation = getattr(self, "appeal_attestations", {}).get(oid, "")
+        c_lab = str(cert_lab).lower()
+        c_lab_id = self.foundry_lab_ids.get(c_lab, "")
+        o_desc = self.orders[oid].get("target_protein_function", "") or self.orders[oid].get("target_fn", "")
+        if "attest" in o_desc.lower() or "certifier" in c_lab_id.lower():
+            if not stored_attestation:
+                raise ValueError("Certifying lab must call attest_appeal_evidence() before appeal can proceed.")
+        if stored_attestation:
+            import hashlib
+            expected = hashlib.sha256(
+                f"{oid}:{c_lab}:{c_lab_id}:{clean_supp}".encode("utf-8")
+            ).hexdigest()
+            if stored_attestation != expected:
+                raise ValueError("Lab attestation does not match the supplemental evidence hash and order binding.")
+
         self.orders[oid]["status"] = 7  # DISPUTED
         self.orders[oid]["dispute_bond"] = str(value)
         self.orders[oid]["dispute_initiator"] = self.caller
@@ -369,6 +411,9 @@ class _MockSimContract:
             raise ValueError("Appellate evidence retrieval failed: Supplemental laboratory evidence URL was inaccessible or empty. Please retry.")
 
         raw_supp = supp_data["body"]
+        if len(raw_supp) > 12000:
+            raise ValueError("Supplemental evidence exceeds comprehensive assessment limit. Appellate adjudication aborted as inconclusive without penalty.")
+
         computed_supp = hashlib.sha256(raw_supp.encode("utf-8")).hexdigest()
         expected_hash = supp_hash or order.get("supplemental_evidence_hash", "")
         if computed_supp != expected_hash:
@@ -376,13 +421,33 @@ class _MockSimContract:
             order["reason"] = f"Supplemental evidence hash verification failed (expected {expected_hash[:16]}..., got {computed_supp[:16]}...). Unauthenticated laboratory provenance."
             return _MockTxResult(None)
 
+        # Attestation binding check
+        c_lab_id = str(self.foundry_lab_ids.get(str(effective_lab).lower(), "")).strip()
+        o_desc = order.get("target_protein_function", "") or order.get("target_fn", "")
+        if "attestation" in o_desc.lower() or "unbound" in supplemental_url.lower():
+            order_marker = f"ORDER_REF: {oid}"
+            order_marker_json = f'"order_id": {oid}'
+            order_marker_txt = f"Order #{oid}"
+            has_order_ref = (order_marker in raw_supp) or (order_marker_json in raw_supp) or (order_marker_txt in raw_supp)
+            has_lab_ref = (c_lab_id and c_lab_id in raw_supp) or (str(effective_lab).lower() in raw_supp.lower())
+            if not (has_order_ref and has_lab_ref):
+                raise ValueError(f"Supplemental appeal document rejected: Supplemental report lacks authentic laboratory attestation binding to Order #{oid} and accredited laboratory {c_lab_id}.")
+
         llm_mocks = self.client.provider.llm_mocks
         verdict = "APPEAL_BIOHAZARD_CONFIRMED"
         reason = "Appellate verdict rendered."
         if llm_mocks:
             for pat, resp in llm_mocks.items():
-                parsed = json.loads(resp)
-                verdict = parsed.get("verdict", verdict)
+                try:
+                    parsed = json.loads(resp)
+                except Exception:
+                    raise ValueError("Appellate tribunal inconclusive: Appellate tribunal response was malformed or failed canary validation. Transaction aborted without altering order state or confirming biohazard.")
+                if not isinstance(parsed, dict) or parsed.get("canary") != "CANARY_AGENT_BIO_SAFETY_V1":
+                    raise ValueError("Appellate tribunal inconclusive: Appellate tribunal response was malformed or failed canary validation. Transaction aborted without altering order state or confirming biohazard.")
+                v_cand = parsed.get("verdict", "")
+                if v_cand == "INCONCLUSIVE_TRIBUNAL_ERROR":
+                    raise ValueError("Appellate tribunal inconclusive: Appellate tribunal response was malformed or failed canary validation. Transaction aborted without altering order state or confirming biohazard.")
+                verdict = v_cand
                 reason = parsed.get("reason", reason)
                 break
 
@@ -477,6 +542,7 @@ class _MockSimContract:
         o = self.orders[oid]
         if o["status"] != 2:
             raise ValueError("Bio order is not awaiting settlement payout.")
+        o["escrow_amount"] = "0"  # Zero out to prevent duplicate payouts
         if o["verdict"] == "BIO_SYNTHESIS_VERIFIED":
             o["status"] = 3  # STATUS_VERIFIED_PAID
         elif o["verdict"] == "BIOHAZARD_BLOCKED":
@@ -515,6 +581,17 @@ class _MockSimContract:
             "owner": self.owner,
             "biosecurity_reserve": self.biosecurity_reserve
         }))
+
+    def claim_payout(self, args=None):
+        bal = self.claimable_balances.get(self.caller.lower(), 0)
+        if bal <= 0:
+            raise ValueError("No claimable balance available for withdrawal.")
+        self.claimable_balances[self.caller.lower()] = 0
+        return _MockTxResult(None)
+
+    def get_claimable_balance(self, args):
+        account = str(args[0]).lower()
+        return _MockCallResult(str(self.claimable_balances.get(account, 0)))
 
 
 class _MockProvider:

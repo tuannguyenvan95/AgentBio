@@ -534,3 +534,46 @@ export async function cancelOrReclaimOnChain(
   await client.waitForTransactionReceipt({ hash: txHash });
   return txHash;
 }
+
+/**
+ * Safe recovery pull-payment withdrawal for pending claimable balances
+ */
+export async function claimPayoutOnChain(
+  contractAddress: string,
+  userAddress: string
+): Promise<string> {
+  await ensureStudionet();
+  const client = getGenLayerClient(userAddress);
+
+  const txHash = await (client.writeContract as any)({
+    address: contractAddress as `0x${string}`,
+    functionName: 'claim_payout',
+    args: [],
+    value: 0n,
+  });
+
+  await client.waitForTransactionReceipt({ hash: txHash });
+  return txHash;
+}
+
+/**
+ * Read pending claimable balance for an account
+ */
+export async function getClaimableBalanceOnChain(
+  contractAddress: string,
+  userAddress: string
+): Promise<string> {
+  try {
+    const client = getGenLayerClient();
+    const res = await (client.readContract as any)({
+      address: contractAddress as `0x${string}`,
+      functionName: 'get_claimable_balance',
+      args: [userAddress],
+    });
+    return String(res || '0');
+  } catch (err) {
+    console.warn('Error fetching claimable balance:', err);
+    return '0';
+  }
+}
+

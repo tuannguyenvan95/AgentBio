@@ -99,6 +99,8 @@ class Contract(gl.Contract):
     default_cooling_off_seconds: bigint
     authorized_foundries: TreeMap[Address, bool]
     foundry_lab_ids: TreeMap[Address, str]
+    appeal_attestations: TreeMap[u64, str]  # order_id -> lab-signed attestation hash
+    claimable_balances: TreeMap[Address, bigint]  # recipient -> pending withdrawal (safe recovery)
 
     def __init__(self):
         deployer = _get_sender()
@@ -110,6 +112,24 @@ class Contract(gl.Contract):
         self.order_counter = u64(0)
         self.authorized_foundries[deployer] = True
         self.foundry_lab_ids[deployer] = "LAB-GENLAYER-DELEGATE-01"
+
+    def _safe_transfer(self, recipient: Address, amount: bigint) -> bool:
+        """
+        Executes outbound native transfer with safe recovery pattern.
+        If outbound transfer succeeds, returns True.
+        If outbound transfer fails, reverts, or is ambiguous, safely credits
+        the exact entitlement to claimable_balances[recipient] so funds are never lost,
+        and can be withdrawn safely via claim_payout().
+        """
+        if amount <= bigint(0):
+            return True
+        try:
+            gl.get_contract_at(recipient).emit_transfer(value=u256(amount))
+            return True
+        except Exception:
+            current_claimable = self.claimable_balances.get(recipient, bigint(0))
+            self.claimable_balances[recipient] = current_claimable + amount
+            return False
 
     def _get_current_timestamp(self) -> bigint:
         import calendar
@@ -127,7 +147,7 @@ class Contract(gl.Contract):
                         return bigint(ts)
         except Exception:
             pass
-        return bigint(1760000000)
+        raise ContractError("Authoritative timestamp unavailable. Transaction aborted for safety.")
 
     # ── Protocol Governance & Registry ────────────────────────────────
 
@@ -170,6 +190,27 @@ class Contract(gl.Contract):
     @gl.public.write
     def register_audit_lab(self, lab_address: Address, lab_id: str) -> None:
         self.register_foundry(lab_address, lab_id)
+
+    @gl.public.write
+    def attest_appeal_evidence(self, order_id: u64, evidence_hash: str) -> None:
+        """Certifying lab binds supplemental evidence to a specific order before appeal."""
+        sender = _get_sender()
+        if not self.authorized_foundries.get(sender, False):
+            raise ContractError("Only registered accredited laboratories can attest evidence.")
+        if order_id not in self.orders:
+            raise ContractError(f"Bio order {int(order_id)} does not exist.")
+        o = self.orders[order_id]
+        if o.status != STATUS_AWAITING_PAYOUT and o.status != STATUS_DISPUTED:
+            raise ContractError("Order must be in AWAITING_PAYOUT or DISPUTED status for attestation.")
+        clean_hash = str(evidence_hash).strip().lower()
+        if not _is_valid_sha256(clean_hash):
+            raise ContractError("Valid 64-character hex SHA-256 evidence hash is required.")
+        import hashlib
+        lab_id = self.foundry_lab_ids.get(sender, "")
+        attestation_binding = hashlib.sha256(
+            f"{int(order_id)}:{_addr_str(sender)}:{lab_id}:{clean_hash}".encode("utf-8")
+        ).hexdigest()
+        self.appeal_attestations[order_id] = attestation_binding
 
     @gl.public.write
     def revoke_foundry(self, foundry: Address) -> None:
@@ -434,17 +475,32 @@ class Contract(gl.Contract):
                     "computed_qc_hash": qc_hash,
                 }
 
+            MAX_COMPREHENSIVE_EVIDENCE_CHARS = 12000
+            spec_len = len(raw_spec)
+            qc_len = len(raw_qc)
+
+            if spec_len > MAX_COMPREHENSIVE_EVIDENCE_CHARS or qc_len > MAX_COMPREHENSIVE_EVIDENCE_CHARS:
+                return {
+                    "canary": CANARY_TOKEN,
+                    "verdict": "EVIDENCE_INSUFFICIENT",
+                    "reason": f"Evidence payload (Spec: {spec_len}, QC: {qc_len}) exceeds comprehensive assessment limit ({MAX_COMPREHENSIVE_EVIDENCE_CHARS} chars). Aborted as inconclusive to prevent missing critical sequence details.",
+                    "fidelity_score": 0,
+                    "confidence": 0,
+                    "computed_spec_hash": spec_hash,
+                    "computed_qc_hash": qc_hash,
+                }
+
             prompt = f"""You are the Chief Biosecurity & Molecular Quality Arbiter on GenLayer.
 Evaluate the synthetic biology order comparing commissioned target specification against delivered synthesis QC report.
 
 ACCREDITED LAB: {lab_id}
 INTENDED FUNCTION: {target_fn}
 
-COMMISSIONED SPECIFICATION:
-{raw_spec[:3500]}
+COMMISSIONED SPECIFICATION ({spec_len} chars):
+{raw_spec}
 
-DELIVERED SEQUENCING QC REPORT:
-{raw_qc[:3500]}
+DELIVERED SEQUENCING QC REPORT ({qc_len} chars):
+{raw_qc}
 
 EVALUATION CRITERIA:
 1. Biosecurity Screening: If dual-use toxins or prohibited pathogens are detected -> Output 'BIOHAZARD_BLOCKED'.
@@ -482,7 +538,7 @@ Respond ONLY with valid JSON:
                 }
 
             v_str = str(parsed.get("verdict", "SEQUENCE_DEFECTIVE")).upper().strip()
-            if v_str not in {"BIO_SYNTHESIS_VERIFIED", "BIOHAZARD_BLOCKED", "SEQUENCE_DEFECTIVE"}:
+            if v_str not in {"BIO_SYNTHESIS_VERIFIED", "BIOHAZARD_BLOCKED", "SEQUENCE_DEFECTIVE", "EVIDENCE_INSUFFICIENT"}:
                 v_str = "SEQUENCE_DEFECTIVE"
 
             fid = int(parsed.get("fidelity_score", 0))
@@ -515,7 +571,7 @@ Respond ONLY with valid JSON:
             mine = leader_fn()
 
             # Retrieval failures or commitment mismatches must match
-            if leader.get("verdict") in {"RETRIEVAL_FAILED", "COMMITMENT_VERIFICATION_FAILED"}:
+            if leader.get("verdict") in {"RETRIEVAL_FAILED", "COMMITMENT_VERIFICATION_FAILED", "EVIDENCE_INSUFFICIENT"}:
                 return mine.get("verdict") == leader.get("verdict")
 
             if mine["verdict"] != leader["verdict"]:
@@ -552,6 +608,9 @@ Respond ONLY with valid JSON:
 
         if adjudication_res.get("verdict") == "COMMITMENT_VERIFICATION_FAILED":
             raise ContractError(f"Commitment verification failed: {adjudication_res.get('reason')}")
+
+        if adjudication_res.get("verdict") == "EVIDENCE_INSUFFICIENT":
+            raise ContractError("Evidence excerpt insufficient for confident determination. Provide complete evidence and retry.")
 
         final_verdict = adjudication_res["verdict"]
         final_fid = u8(adjudication_res["fidelity_score"])
@@ -617,6 +676,17 @@ Respond ONLY with valid JSON:
         o.dispute_bond = staked
         o.appeal_certifying_lab = certifying_lab
         o.supplemental_evidence_hash = clean_supp_hash
+        # Verify lab has attested this evidence for this specific order
+        stored_attestation = self.appeal_attestations.get(order_id, "")
+        if not stored_attestation:
+            raise ContractError("Certifying lab must call attest_appeal_evidence() before appeal can proceed.")
+        import hashlib
+        c_lab_id = self.foundry_lab_ids.get(certifying_lab, "")
+        expected_attestation = hashlib.sha256(
+            f"{int(order_id)}:{_addr_str(certifying_lab)}:{c_lab_id}:{clean_supp_hash}".encode("utf-8")
+        ).hexdigest()
+        if stored_attestation != expected_attestation:
+            raise ContractError("Lab attestation does not match the supplemental evidence hash and order binding.")
         o.reason = f"[DISPUTE by {_addr_str(sender)[:8]}]: {clean_reason} | Prior: {o.reason}"
         self.total_bio_locked = self.total_bio_locked + staked
 
@@ -680,6 +750,32 @@ Respond ONLY with valid JSON:
                     "reason": f"Supplemental evidence hash mismatch (expected {expected_supp_hash[:12]}..., got {computed_hash[:12]}...).",
                 }
 
+            supp_len = len(raw_supp)
+            MAX_COMPREHENSIVE_EVIDENCE_CHARS = 12000
+            if supp_len > MAX_COMPREHENSIVE_EVIDENCE_CHARS:
+                return {
+                    "canary": CANARY_TOKEN,
+                    "verdict": "EXCERPT_INSUFFICIENT",
+                    "reason": f"Supplemental evidence ({supp_len} chars) exceeds comprehensive assessment limit ({MAX_COMPREHENSIVE_EVIDENCE_CHARS} chars). Aborted as inconclusive.",
+                }
+
+            # Laboratory-authorized attestation binding verification
+            lab_id_str = str(lab_id).strip()
+            lab_addr_str = _addr_str(c_lab)
+            order_marker = f"ORDER_REF: {int(order_id)}"
+            order_marker_json = f'"order_id": {int(order_id)}'
+            order_marker_txt = f"Order #{int(order_id)}"
+
+            has_order_ref = (order_marker in raw_supp) or (order_marker_json in raw_supp) or (order_marker_txt in raw_supp)
+            has_lab_ref = (lab_id_str in raw_supp) or (lab_addr_str in raw_supp.lower())
+
+            if not (has_order_ref and has_lab_ref):
+                return {
+                    "canary": CANARY_TOKEN,
+                    "verdict": "UNAUTHORIZED_ATTESTATION",
+                    "reason": f"Supplemental report lacks authentic laboratory attestation binding to Order #{int(order_id)} and accredited laboratory {lab_id_str}.",
+                }
+
             prompt = f"""You are the Supreme Appellate Biosecurity Court on GenLayer.
 Re-examine the contested biological order with authenticated supplemental laboratory evidence.
 
@@ -688,12 +784,12 @@ INTENDED FUNCTION: {target_fn}
 PRIOR VERDICT: {initial_verdict}
 APPELLANT ROLE: {"RESEARCHER" if is_researcher else "FOUNDRY"}
 
-SUPPLEMENTAL AUDIT EVIDENCE:
-{raw_supp[:3500]}
+SUPPLEMENTAL AUDIT EVIDENCE ({supp_len} chars):
+{raw_supp}
 
 DECISION CRITERIA:
 - If prior was BIOHAZARD_BLOCKED and sequence is proven benign therapeutic -> 'APPEAL_BIOHAZARD_OVERTURNED_BENIGN'.
-- If biological weapon or prohibited pathogen confirmed -> 'APPEAL_BIOHAZARD_CONFIRMED'.
+- If prohibited pathogen confirmed -> 'APPEAL_BIOHAZARD_CONFIRMED'.
 - If Foundry appealed and delivery authentic (fidelity >= 80%) -> 'APPEAL_UPHELD_VERIFIED'.
 - If Researcher appealed and delivery proven defective -> 'APPEAL_OVERTURNED_DEFECTIVE'.
 - Otherwise -> 'APPEAL_DISMISSED'.
@@ -713,12 +809,19 @@ Respond ONLY with valid JSON:
                     pass
 
             if not parsed or str(parsed.get("canary", "")) != CANARY_TOKEN:
-                fallback = "APPEAL_BIOHAZARD_CONFIRMED" if initial_verdict == "BIOHAZARD_BLOCKED" else "APPEAL_DISMISSED"
-                return {"canary": CANARY_TOKEN, "verdict": fallback, "reason": "Appellate parsing failure."}
+                return {
+                    "canary": CANARY_TOKEN,
+                    "verdict": "INCONCLUSIVE_TRIBUNAL_ERROR",
+                    "reason": "Appellate tribunal response was malformed or failed canary validation.",
+                }
 
             v_str = str(parsed.get("verdict", "")).upper().strip()
             if v_str not in {"APPEAL_UPHELD_VERIFIED", "APPEAL_OVERTURNED_DEFECTIVE", "APPEAL_BIOHAZARD_OVERTURNED_BENIGN", "APPEAL_BIOHAZARD_CONFIRMED", "APPEAL_DISMISSED"}:
-                v_str = "APPEAL_DISMISSED"
+                return {
+                    "canary": CANARY_TOKEN,
+                    "verdict": "INCONCLUSIVE_TRIBUNAL_ERROR",
+                    "reason": f"Unrecognized appellate verdict '{v_str}'. Aborting without altering state.",
+                }
 
             return {
                 "canary": CANARY_TOKEN,
@@ -742,6 +845,15 @@ Respond ONLY with valid JSON:
         if appeal_res.get("verdict") == "RETRIEVAL_FAILED":
             raise ContractError("Supplemental evidence retrieval failed. Adjudication aborted without penalty.")
 
+        if appeal_res.get("verdict") == "EXCERPT_INSUFFICIENT":
+            raise ContractError("Supplemental evidence exceeds comprehensive assessment limit. Appellate adjudication aborted as inconclusive without penalty.")
+
+        if appeal_res.get("verdict") == "UNAUTHORIZED_ATTESTATION":
+            raise ContractError(f"Supplemental appeal document rejected: {appeal_res.get('reason')}")
+
+        if appeal_res.get("verdict") == "INCONCLUSIVE_TRIBUNAL_ERROR":
+            raise ContractError(f"Appellate tribunal inconclusive: {appeal_res.get('reason')}. Transaction aborted without altering order state or confirming biohazard.")
+
         app_verdict = appeal_res["verdict"]
         app_reason = appeal_res["reason"]
 
@@ -760,36 +872,36 @@ Respond ONLY with valid JSON:
             o.verdict = "SEQUENCE_DEFECTIVE"
             o.reason = f"[BIOHAZARD OVERTURNED] Proven benign: {app_reason}"
             if escrow_val > bigint(0):
-                gl.get_contract_at(o.researcher).emit_transfer(value=u256(escrow_val))
+                self._safe_transfer(o.researcher, escrow_val)
             if bond_val > bigint(0):
-                gl.get_contract_at(appellant).emit_transfer(value=u256(bond_val))
+                self._safe_transfer(appellant, bond_val)
 
         elif app_verdict == "APPEAL_BIOHAZARD_CONFIRMED" or (initial_verdict == "BIOHAZARD_BLOCKED" and app_verdict != "APPEAL_BIOHAZARD_OVERTURNED_BENIGN"):
             o.status = STATUS_BIOHAZARD_SLASHED
             o.verdict = "BIOHAZARD_BLOCKED"
             o.reason = f"[PATHOGEN FORFEITURE] Confirmed biohazard: {app_reason}"
             if escrow_val > bigint(0):
-                gl.get_contract_at(self.biosecurity_reserve).emit_transfer(value=u256(escrow_val))
+                self._safe_transfer(self.biosecurity_reserve, escrow_val)
             if bond_val > bigint(0):
-                gl.get_contract_at(self.biosecurity_reserve).emit_transfer(value=u256(bond_val))
+                self._safe_transfer(self.biosecurity_reserve, bond_val)
 
         elif app_verdict == "APPEAL_UPHELD_VERIFIED":
             o.status = STATUS_VERIFIED_PAID
             o.verdict = "BIO_SYNTHESIS_VERIFIED"
             o.reason = f"[APPEAL UPHELD] Synthesis verified: {app_reason}"
             if escrow_val > bigint(0):
-                gl.get_contract_at(o.foundry).emit_transfer(value=u256(escrow_val))
+                self._safe_transfer(o.foundry, escrow_val)
             if bond_val > bigint(0):
-                gl.get_contract_at(appellant).emit_transfer(value=u256(bond_val))
+                self._safe_transfer(appellant, bond_val)
 
         elif app_verdict == "APPEAL_OVERTURNED_DEFECTIVE":
             o.status = STATUS_DEFECTIVE_REFUNDED
             o.verdict = "SEQUENCE_DEFECTIVE"
             o.reason = f"[APPEAL UPHELD] Delivery defective: {app_reason}"
             if escrow_val > bigint(0):
-                gl.get_contract_at(o.researcher).emit_transfer(value=u256(escrow_val))
+                self._safe_transfer(o.researcher, escrow_val)
             if bond_val > bigint(0):
-                gl.get_contract_at(appellant).emit_transfer(value=u256(bond_val))
+                self._safe_transfer(appellant, bond_val)
 
         else:
             if initial_verdict == "BIO_SYNTHESIS_VERIFIED":
@@ -797,18 +909,17 @@ Respond ONLY with valid JSON:
                 o.verdict = "BIO_SYNTHESIS_VERIFIED"
                 o.reason = f"[APPEAL DISMISSED] Upheld verified: {app_reason}"
                 if escrow_val > bigint(0):
-                    gl.get_contract_at(o.foundry).emit_transfer(value=u256(escrow_val))
+                    self._safe_transfer(o.foundry, escrow_val)
                 if bond_val > bigint(0):
-                    gl.get_contract_at(counterparty).emit_transfer(value=u256(bond_val))
+                    self._safe_transfer(counterparty, bond_val)
             else:
                 o.status = STATUS_DEFECTIVE_REFUNDED
                 o.verdict = "SEQUENCE_DEFECTIVE"
                 o.reason = f"[APPEAL DISMISSED] Upheld defective: {app_reason}"
                 if escrow_val > bigint(0):
-                    gl.get_contract_at(o.researcher).emit_transfer(value=u256(escrow_val))
+                    self._safe_transfer(o.researcher, escrow_val)
                 if bond_val > bigint(0):
-                    gl.get_contract_at(counterparty).emit_transfer(value=u256(bond_val))
-
+                    self._safe_transfer(counterparty, bond_val)
     @gl.public.write
     def recover_disputed_order(self, order_id: u64) -> None:
         if order_id not in self.orders:
@@ -838,23 +949,23 @@ Respond ONLY with valid JSON:
             o.status = STATUS_BIOHAZARD_SLASHED
             o.reason = "[DISPUTE TIMEOUT] Confiscated to reserve."
             if escrow_val > bigint(0):
-                gl.get_contract_at(self.biosecurity_reserve).emit_transfer(value=u256(escrow_val))
+                self._safe_transfer(self.biosecurity_reserve, escrow_val)
             if bond_val > bigint(0):
-                gl.get_contract_at(self.biosecurity_reserve).emit_transfer(value=u256(bond_val))
+                self._safe_transfer(self.biosecurity_reserve, bond_val)
         elif o.verdict == "BIO_SYNTHESIS_VERIFIED":
             o.status = STATUS_VERIFIED_PAID
             o.reason = "[DISPUTE TIMEOUT] Initial verified verdict upheld."
             if escrow_val > bigint(0):
-                gl.get_contract_at(o.foundry).emit_transfer(value=u256(escrow_val))
+                self._safe_transfer(o.foundry, escrow_val)
             if bond_val > bigint(0):
-                gl.get_contract_at(counterparty).emit_transfer(value=u256(bond_val))
+                self._safe_transfer(counterparty, bond_val)
         else:
             o.status = STATUS_DEFECTIVE_REFUNDED
             o.reason = "[DISPUTE TIMEOUT] Initial defective verdict upheld."
             if escrow_val > bigint(0):
-                gl.get_contract_at(o.researcher).emit_transfer(value=u256(escrow_val))
+                self._safe_transfer(o.researcher, escrow_val)
             if bond_val > bigint(0):
-                gl.get_contract_at(counterparty).emit_transfer(value=u256(bond_val))
+                self._safe_transfer(counterparty, bond_val)
 
     @gl.public.write
     def finalize_settlement(self, order_id: u64) -> None:
@@ -877,15 +988,15 @@ Respond ONLY with valid JSON:
         if o.verdict == "BIO_SYNTHESIS_VERIFIED":
             o.status = STATUS_VERIFIED_PAID
             if escrow_val > bigint(0):
-                gl.get_contract_at(o.foundry).emit_transfer(value=u256(escrow_val))
+                self._safe_transfer(o.foundry, escrow_val)
         elif o.verdict == "BIOHAZARD_BLOCKED":
             o.status = STATUS_BIOHAZARD_SLASHED
             if escrow_val > bigint(0):
-                gl.get_contract_at(self.biosecurity_reserve).emit_transfer(value=u256(escrow_val))
+                self._safe_transfer(self.biosecurity_reserve, escrow_val)
         else:
             o.status = STATUS_DEFECTIVE_REFUNDED
             if escrow_val > bigint(0):
-                gl.get_contract_at(o.researcher).emit_transfer(value=u256(escrow_val))
+                self._safe_transfer(o.researcher, escrow_val)
 
     @gl.public.write
     def cancel_or_reclaim(self, order_id: u64) -> None:
@@ -917,7 +1028,32 @@ Respond ONLY with valid JSON:
         self.total_orders_settled = self.total_orders_settled + u32(1)
 
         if escrow_val > bigint(0):
-            gl.get_contract_at(o.researcher).emit_transfer(value=u256(escrow_val))
+            self._safe_transfer(o.researcher, escrow_val)
+
+    @gl.public.write
+    def claim_payout(self) -> None:
+        """
+        Pull-payment safe recovery mechanism.
+        Enables recipients to withdraw pending claimable balances safely if
+        prior automated outbound push-transfers failed or were deferred.
+        Guarantees zero lost entitlements and zero duplicate payouts.
+        """
+        sender = _get_sender()
+        balance = self.claimable_balances.get(sender, bigint(0))
+        if balance <= bigint(0):
+            raise ContractError("No claimable balance available for withdrawal.")
+
+        self.claimable_balances[sender] = bigint(0)
+        try:
+            gl.get_contract_at(sender).emit_transfer(value=u256(balance))
+        except Exception:
+            self.claimable_balances[sender] = balance
+            raise ContractError("Outbound transfer failed during payout claim. Balance preserved.")
+
+    @gl.public.view
+    def get_claimable_balance(self, account: Address) -> str:
+        """Returns the pending claimable balance for an account."""
+        return str(self.claimable_balances.get(account, bigint(0)))
 
     # ── Read-only Views ───────────────────────────────────────────────
 
