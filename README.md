@@ -88,18 +88,39 @@ pytest tests/ -v
 > **Deployer / Researcher Account:** `0xF34587A45C397281Ef6BDd839d4A1de2DEe393ad`  
 > **Accredited Foundry Account:** `0x2f166C507c7fbd7885999207058a4BA6A2E49BaC`  
 
-| Bước Nghiệp Vụ | Tên Hàm Giao Dịch | Transaction Hash Trên StudioNet | Kết Quả Thực Thi |
+#### 🔹 1. Khởi Tạo Hợp Đồng & Đăng Ký Foundry
+| Bước Nghiệp Vụ | Hàm Giao Dịch | Transaction Hash Trên StudioNet | Kết Quả Thực Thi |
 | :--- | :--- | :--- | :--- |
-| **0. Contract Deployment** | `Contract.__init__` | `0x879d3bcfa3c95990e1386ac0d5ae8e5556373012c03c217f4249a43fa76bf5c6` | Hợp đồng khởi tạo thành công, owner & reserve gán ngay trong constructor |
-| **1. Set Cooling-Off** | `set_cooling_off_seconds(5)` | `0x720fb34839f75eb787c6b76c502551b6ccbe4a347ee54ee0169b533157c23a39` | Cấu hình cửa sổ khiếu nại linh hoạt cho phép nghiệm thu nhanh |
-| **2. Register Foundry** | `register_foundry(...)` | `0xd895baf10ad4491877f5671e80899775626bb4016b98ed829708ce025d0ff2c6` | Cấp chứng nhận `ISO-17025-TWIST-BIOSYNTH-01` cho ví Foundry |
-| **3. Order Synthesis #1** | `order_synthesis_designated(...)` | `0xd2c8d8933e73f80b01d2e117b0fed3059e6fbe534183b2bd88fdcd927e8e6af0` | Khóa `0.015 GEN` ký quỹ + Gắn mã băm nội dung tài liệu 64-hex SHA-256 (`b78e...74dd`) |
-| **4. Accept Agreement** | `accept_synthesis_agreement(1)` | `0x8bda1dd389e9b9479f05559653365b20713c31c8d1332e5132848f930330b661` | Ví Foundry chấp thuận điều khoản hợp đồng song phương |
-| **5. Submit QC Proof** | `submit_synthesis_proof(1, ...)` | `0x6b3a23f72d293ee804c71e9c9e9226d28effafe737a42c28588087176ff118e0` | Nộp chứng nhận giải trình tự + Cam kết mã băm QC 64-hex SHA-256 |
-| **6. AI Jury Adjudication** | `adjudicate_biosecurity_and_qc(1)` | `0xe7e47d7c477bad84d0da494df34396f47d7dd16671b6329ea0003096e605616e` | Bồi thẩm đoàn AI đồng thuận: `BIO_SYNTHESIS_VERIFIED`, Độ khớp 100%, Tin cậy 100% |
-| **7. Clear Cooling-Off** | `set_order_cooling_off(1, 0)` | `0x66b45ca529540007b48b0d36a14d0c8af81c1599488a29b15e607eb119779a6a` | Cửa sổ làm nguội kết thúc, mở khóa giải ngân tài chính |
-| **8. Finalize Settlement** | `finalize_settlement(1)` | `0xabb2b6078547c37ef33b5901dff10569b2dac67fc73884580509a4c9bb61136d` | Nghiệm thu tài chính on-chain: Trạng thái cập nhật `STATUS_VERIFIED_PAID`, giải ngân Escrow |
-| **9. Order Synthesis #2** | `order_synthesis(...)` | `0x82c68b3eb31f6b9eff814c008006fa4aac18aa7000fd575086f38f8d201e8f14` | Mở đơn hàng sinh học tự do thứ 2 (CRISPR-Cas9 guide RNA), khóa `0.01 GEN` |
+| **Contract Deployment** | `Contract.__init__` | `0x879d3bcfa3c95990e1386ac0d5ae8e5556373012c03c217f4249a43fa76bf5c6` | Khởi tạo hợp đồng thành công, owner & reserve gán trong constructor |
+| **Set Cooling-Off** | `set_cooling_off_seconds(5)` | `0x720fb34839f75eb787c6b76c502551b6ccbe4a347ee54ee0169b533157c23a39` | Cấu hình cửa sổ khiếu nại phục vụ kiểm thử |
+| **Register Foundry** | `register_foundry(...)` | `0xd895baf10ad4491877f5671e80899775626bb4016b98ed829708ce025d0ff2c6` | Cấp chứng nhận `ISO-17025-TWIST-BIOSYNTH-01` cho ví Foundry |
+
+#### 🔹 2. Kịch Bản 1: Tổng Hợp Chuẩn Xác -> Giải Ngân Cho Foundry (Order #1)
+| Bước Nghiệp Vụ | Hàm Giao Dịch | Transaction Hash Trên StudioNet | Kết Quả Thực Thi |
+| :--- | :--- | :--- | :--- |
+| **Order Synthesis** | `order_synthesis_designated(...)` | `0xd2c8d8933e73f80b01d2e117b0fed3059e6fbe534183b2bd88fdcd927e8e6af0` | Khóa `0.015 GEN` ký quỹ + Cam kết băm FASTA (`b78e...74dd`) |
+| **Accept Agreement** | `accept_synthesis_agreement(1)` | `0x8bda1dd389e9b9479f05559653365b20713c31c8d1332e5132848f930330b661` | Ví Foundry chấp thuận điều khoản hợp đồng song phương |
+| **Submit QC Proof** | `submit_synthesis_proof(1, ...)` | `0x6b3a23f72d293ee804c71e9c9e9226d28effafe737a42c28588087176ff118e0` | Nộp chứng nhận giải trình tự + Cam kết mã băm QC |
+| **AI Jury Adjudication** | `adjudicate_biosecurity_and_qc(1)` | `0xe7e47d7c477bad84d0da494df34396f47d7dd16671b6329ea0003096e605616e` | Phán quyết: `BIO_SYNTHESIS_VERIFIED`, Độ khớp 100%, Tin cậy 100% |
+| **Finalize Settlement** | `finalize_settlement(1)` | `0xabb2b6078547c37ef33b5901dff10569b2dac67fc73884580509a4c9bb61136d` | **Giải ngân tài chính cho Foundry**, trạng thái: `STATUS_VERIFIED_PAID` |
+
+#### 🔹 3. Kịch Bản 2: Trình Tự Đột Biến Lỗi (< 80%) -> Hoàn Tiền Cho Researcher (Order #2)
+| Bước Nghiệp Vụ | Hàm Giao Dịch | Transaction Hash Trên StudioNet | Kết Quả Thực Thi |
+| :--- | :--- | :--- | :--- |
+| **Order Synthesis** | `order_synthesis(...)` | `0x82c68b3eb31f6b9eff814c008006fa4aac18aa7000fd575086f38f8d201e8f14` | Khóa `0.01 GEN` ký quỹ chuỗi CRISPR-Cas9 gRNA |
+| **Accept Agreement** | `accept_synthesis_agreement(2)` | `0x675f7cea86af2d4655b67b4ff755341c776304868cf77ff6877f5e6b26a8de65` | Ví Foundry nhận đơn |
+| **Submit Defective QC** | `submit_synthesis_proof(2, ...)` | `0xd28e67ca78e3ad70aa4cc670a4725cb40130d3babf3015efcf45ede3f4db808b` | Nộp kết quả giải trình tự đột biến sai lệch (`f47c...e213`) |
+| **AI Jury Adjudication** | `adjudicate_biosecurity_and_qc(2)` | `0x92d70378653840704d6b56b9b9cf1ba7687ae6ecfaf997be0f5b19c5548c59d8` | Phán quyết: `SEQUENCE_DEFECTIVE`, phát hiện đột biến không đạt chuẩn |
+| **Finalize Refund** | `finalize_settlement(2)` | `0x31262d9e93e7f60e1e83df78a4c25ca438979050a35e4fc763d06f506539cf2d` | **Hoàn tiền 100% Escrow cho Researcher**, trạng thái: `STATUS_DEFECTIVE_REFUNDED` |
+
+#### 🔹 4. Kịch Bản 3: Phát Hiện Mầm Bệnh Nguy Hiểm (Botulinum Toxin) -> Tịch Thu Vào Reserve (Order #3)
+| Bước Nghiệp Vụ | Hàm Giao Dịch | Transaction Hash Trên StudioNet | Kết Quả Thực Thi |
+| :--- | :--- | :--- | :--- |
+| **Order Biohazard** | `order_synthesis(...)` | `0xfe1ee6f98ebc17939a50dcdcfd9e496642f4af67a4dfe6f347c8cadab6c74b91` | Khóa `0.01 GEN` thử nghiệm chuỗi độc tố Botulinum Neurotoxin type A |
+| **Accept Agreement** | `accept_synthesis_agreement(3)` | `0x32d6c01826e8f54608b5c570bf1b51a1e6f554d0f905b42ed6a0c2812b2a2787` | Ví Foundry chấp thuận |
+| **Submit QC Proof** | `submit_synthesis_proof(3, ...)` | `0xf1048f6825ea9f254d5349fc68fc702c63047925fd14ad343ff3fa2da40740e0` | Nộp QC hash độc tố (`ba66...ab34`) |
+| **AI Screening Jury** | `adjudicate_biosecurity_and_qc(3)` | `0xaf01aa5bf0b49ecd766b451267eba73802403bbf59b5741c36bb8af79bbc2761` | Phán quyết: `BIOHAZARD_BLOCKED`, phát hiện Select Agent Lethal Toxin |
+| **Finalize Slash** | `finalize_settlement(3)` | `0x88bf4642bd668ea9684f8b597a640c922e83174b77648b544b1a1206b3e36ca0` | **Tịch thu 100% Escrow vào Quỹ bảo an sinh học (Reserve)**, trạng thái: `STATUS_BIOHAZARD_SLASHED` |
 
 ---
 

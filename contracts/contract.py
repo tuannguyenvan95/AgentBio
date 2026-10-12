@@ -749,6 +749,7 @@ Respond ONLY with valid JSON:
         bond_val = o.dispute_bond
         total_settling = escrow_val + bond_val
         o.dispute_bond = bigint(0)
+        o.escrow_amount = bigint(0)
         self.total_bio_locked = self.total_bio_locked - total_settling
         self.total_orders_settled = self.total_orders_settled + u32(1)
 
@@ -826,6 +827,7 @@ Respond ONLY with valid JSON:
         bond_val = o.dispute_bond
         total_settling = escrow_val + bond_val
         o.dispute_bond = bigint(0)
+        o.escrow_amount = bigint(0)
         self.total_bio_locked = self.total_bio_locked - total_settling
         self.total_orders_settled = self.total_orders_settled + u32(1)
 
@@ -868,6 +870,7 @@ Respond ONLY with valid JSON:
             raise ContractError("Dispute cooling-off window is still active.")
 
         escrow_val = o.escrow_amount
+        o.escrow_amount = bigint(0)
         self.total_bio_locked = self.total_bio_locked - escrow_val
         self.total_orders_settled = self.total_orders_settled + u32(1)
 
@@ -909,6 +912,7 @@ Respond ONLY with valid JSON:
         o.reason = "Order expired and escrow reclaimed by researcher."
 
         escrow_val = o.escrow_amount
+        o.escrow_amount = bigint(0)
         self.total_bio_locked = self.total_bio_locked - escrow_val
         self.total_orders_settled = self.total_orders_settled + u32(1)
 
