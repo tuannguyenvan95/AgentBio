@@ -2,7 +2,7 @@
 
 > **Track:** DeSci (Decentralized Science) / Biosecurity / Subjective Consensus  
 > **Target Network:** GenLayer Studionet (Chain ID: `61999` / `0xF1EF`, RPC: `https://studio.genlayer.com/api`)  
-> **Authoritative Intelligent Contract:** `0x5001ECA0bEd26d0dDC83aE9d352eDa569C78705E`  
+> **Authoritative Intelligent Contract:** `0x5469c04Be0DA8Af48af467Db647aD9c044b3Fe45`  
 > **Live Production dApp:** [https://agentbio.vercel.app](https://agentbio.vercel.app)  
 > **GitHub Repository:** [https://github.com/tuannguyenvan95/AgentBio](https://github.com/tuannguyenvan95/AgentBio)  
 > **Hackathon Target:** Agent Tank Hackathon — Track: DeSci & Subjective Consensus  
@@ -115,7 +115,7 @@ Hợp đồng đã được hoàn thiện toàn diện theo 5 tiêu chuẩn an t
    - Số dư trong đơn hàng (`o.escrow_amount`) và `o.dispute_bond` được gán về `0` ngay lập tức trước khi thực hiện chuyển tiền (Checks-Effects-Interactions Pattern), triệt tiêu hoàn toàn nguy cơ rút đúp (duplicate payouts) hoặc thất thoát quyền lợi tài chính.
 
 ### ⛓️ Bảng Đối Chiếu Bằng Chứng Giao Dịch Thực Tế Trên GenLayer StudioNet:
-> **Authoritative Contract Address:** `0x5001ECA0bEd26d0dDC83aE9d352eDa569C78705E`  
+> **Authoritative Contract Address:** `0x5469c04Be0DA8Af48af467Db647aD9c044b3Fe45`  
 > **Deployer / Protocol Owner Account:** `0x0b0b3e21bbe0a8e2e51525b9c14dc656a3a32056`  
 > **Accredited Foundry Account:** `0x2f166C507c7fbd7885999207058a4BA6A2E49BaC`  
 
