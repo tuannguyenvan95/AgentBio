@@ -36,7 +36,10 @@ def _get_sender() -> Address:
     try:
         return gl.message.sender_address
     except Exception:
-        raise ContractError("Cannot resolve sender address.")
+        try:
+            return gl.message.sender
+        except Exception:
+            raise ContractError("Cannot resolve sender address.")
 
 
 def _is_valid_sha256(h: str) -> bool:
