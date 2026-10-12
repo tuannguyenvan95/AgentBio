@@ -378,17 +378,14 @@ class _MockSimContract:
         stored_attestation = getattr(self, "appeal_attestations", {}).get(oid, "")
         c_lab = str(cert_lab).lower()
         c_lab_id = self.foundry_lab_ids.get(c_lab, "")
-        o_desc = self.orders[oid].get("target_protein_function", "") or self.orders[oid].get("target_fn", "")
-        if "attest" in o_desc.lower() or "certifier" in c_lab_id.lower():
-            if not stored_attestation:
-                raise ValueError("Certifying lab must call attest_appeal_evidence() before appeal can proceed.")
-        if stored_attestation:
-            import hashlib
-            expected = hashlib.sha256(
-                f"{oid}:{c_lab}:{c_lab_id}:{clean_supp}".encode("utf-8")
-            ).hexdigest()
-            if stored_attestation != expected:
-                raise ValueError("Lab attestation does not match the supplemental evidence hash and order binding.")
+        if not stored_attestation:
+            raise ValueError("Certifying lab must call attest_appeal_evidence() before appeal can proceed.")
+        import hashlib
+        expected = hashlib.sha256(
+            f"{oid}:{c_lab}:{c_lab_id}:{clean_supp}".encode("utf-8")
+        ).hexdigest()
+        if stored_attestation != expected:
+            raise ValueError("Lab attestation does not match the supplemental evidence hash and order binding.")
 
         self.orders[oid]["status"] = 7  # DISPUTED
         self.orders[oid]["dispute_bond"] = str(value)
@@ -428,15 +425,13 @@ class _MockSimContract:
 
         # Attestation binding check
         c_lab_id = str(self.foundry_lab_ids.get(str(effective_lab).lower(), "")).strip()
-        o_desc = order.get("target_protein_function", "") or order.get("target_fn", "")
-        if "attestation" in o_desc.lower() or "unbound" in supplemental_url.lower():
-            order_marker = f"ORDER_REF: {oid}"
-            order_marker_json = f'"order_id": {oid}'
-            order_marker_txt = f"Order #{oid}"
-            has_order_ref = (order_marker in raw_supp) or (order_marker_json in raw_supp) or (order_marker_txt in raw_supp)
-            has_lab_ref = (c_lab_id and c_lab_id in raw_supp) or (str(effective_lab).lower() in raw_supp.lower())
-            if not (has_order_ref and has_lab_ref):
-                raise ValueError(f"Supplemental appeal document rejected: Supplemental report lacks authentic laboratory attestation binding to Order #{oid} and accredited laboratory {c_lab_id}.")
+        order_marker = f"ORDER_REF: {oid}"
+        order_marker_json = f'"order_id": {oid}'
+        order_marker_txt = f"Order #{oid}"
+        has_order_ref = (order_marker in raw_supp) or (order_marker_json in raw_supp) or (order_marker_txt in raw_supp)
+        has_lab_ref = (c_lab_id and c_lab_id in raw_supp) or (str(effective_lab).lower() in raw_supp.lower())
+        if not (has_order_ref and has_lab_ref):
+            raise ValueError(f"Supplemental appeal document rejected: Supplemental report lacks authentic laboratory attestation binding to Order #{oid} and accredited laboratory {c_lab_id}.")
 
         llm_mocks = self.client.provider.llm_mocks
         verdict = "APPEAL_BIOHAZARD_CONFIRMED"

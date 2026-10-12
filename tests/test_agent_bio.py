@@ -172,6 +172,7 @@ def test_appeal_requires_accredited_lab_and_hash_commitment(contract, researcher
     assert "64-character hex" in str(exc2.value).lower()
 
     # 4. Valid appeal with accredited lab & genuine 64-hex hash succeeds
+    contract.connect(audit_lab).attest_appeal_evidence(args=[order_id, "d" * 64]).transact()
     contract.connect(researcher).appeal_verdict(
         args=[order_id, "Substantive independent mass spec proves benign construct", audit_lab, "d" * 64]
     ).transact(value=100)

@@ -74,10 +74,11 @@ def test_dual_evidence_authentication_and_biohazard_slash(client):
 
     # Step 4: Malicious actor files appeal designating an accredited reviewing lab
     supp_url = "https://supplemental-lab.org/proof.txt"
-    supp_body = "Supplemental run confirms toxin"
+    supp_body = f"Supplemental run confirms toxin ORDER_REF: {order_id} LAB-ISO17025-INDEPENDENT"
     supp_hash = _sha256(supp_body)
     audit_lab = client.accounts[2]
     contract.connect(owner).register_audit_lab(args=[audit_lab, "LAB-ISO17025-INDEPENDENT"])
+    contract.connect(audit_lab).attest_appeal_evidence(args=[order_id, supp_hash])
 
     contract.connect(researcher).appeal_verdict(
         args=[order_id, "Attempting to claim false positive classification", audit_lab, supp_hash],
@@ -172,8 +173,9 @@ def test_appeal_cannot_bypass_biohazard_even_if_tribunal_claims_verified(client)
 
     # Step 4: Appellant stakes 10% bond (0.5 GEN) and files an appeal
     supp_url = "https://adversarial-rebuttal.org/proof.txt"
-    supp_body = "Manipulated lab report"
+    supp_body = f"Manipulated lab report ORDER_REF: {order_id} LAB-ISO17025-AUDIT"
     supp_hash = _sha256(supp_body)
+    contract.connect(audit_lab).attest_appeal_evidence(args=[order_id, supp_hash])
 
     contract.connect(researcher).appeal_verdict(
         args=[order_id, "Frivolous contestation attempting to bypass biosecurity fine", audit_lab, supp_hash],
@@ -390,8 +392,9 @@ def test_overturned_order_recovery_researcher_appeal(client):
 
     # Step 4: Researcher stakes 10% bond (0.1 GEN) and appeals with lab proof of defect
     supp_url = "https://independent-lab.org/hplc.txt"
-    supp_body = "HPLC proof of truncation"
+    supp_body = f"HPLC proof of truncation ORDER_REF: {order_id} LAB-ISO17025-INDEPENDENT"
     supp_hash = _sha256(supp_body)
+    contract.connect(audit_lab).attest_appeal_evidence(args=[order_id, supp_hash])
 
     contract.connect(researcher).appeal_verdict(
         args=[order_id, "Independent HPLC spectrometry proves sequence truncated at residue 15", audit_lab, supp_hash],
@@ -513,8 +516,9 @@ def test_overturned_order_recovery_foundry_appeal(client):
 
     # Step 4: Foundry appeals with 10% bond (0.3 GEN) and provides PacBio HiFi data
     supp_url = "https://foundry.com/pacbio_hifi.txt"
-    supp_body = "PacBio HiFi consensus verified"
+    supp_body = f"PacBio HiFi consensus verified ORDER_REF: {order_id} LAB-PACBIO-CERTIFIED"
     supp_hash = _sha256(supp_body)
+    contract.connect(audit_lab).attest_appeal_evidence(args=[order_id, supp_hash])
 
     contract.connect(foundry).appeal_verdict(
         args=[order_id, "PacBio HiFi circular consensus sequencing proves 99.9% base accuracy", audit_lab, supp_hash],
@@ -598,7 +602,9 @@ def test_recovery_path_for_abandoned_disputed_order(client):
     contract.connect(researcher).adjudicate_biosecurity_and_qc(args=[order_id])
 
     # Researcher disputes
-    supp_hash = _sha256("dispute_evidence")
+    supp_body = f"dispute_evidence ORDER_REF: {order_id} LAB-AUDIT-ISO"
+    supp_hash = _sha256(supp_body)
+    contract.connect(audit_lab).attest_appeal_evidence(args=[order_id, supp_hash])
     contract.connect(researcher).appeal_verdict(
         args=[order_id, "Frivolous contestation later abandoned", audit_lab, supp_hash],
         value=100000000000000000
@@ -745,8 +751,9 @@ def test_defensible_appeal_overturns_false_positive_biohazard_protecting_escrow(
 
     # Researcher appeals with substantive justification & staked bond
     supp_url = "https://certified-lab.org/attestation.pdf"
-    supp_body = "Certified Non-Toxic Assays"
+    supp_body = f"Certified Non-Toxic Assays ORDER_REF: {order_id} LAB-CERTIFIED-ASSAY"
     supp_hash = _sha256(supp_body)
+    contract.connect(audit_lab).attest_appeal_evidence(args=[order_id, supp_hash])
 
     contract.connect(researcher).appeal_verdict(
         args=[order_id, "Legitimate therapeutic protein certified by mass spec assay.", audit_lab, supp_hash],
@@ -1016,6 +1023,7 @@ def test_appeal_requires_authenticated_laboratory_provenance_and_hash_integrity(
 
     # Owner registers independent accredited audit lab
     contract.connect(owner).register_audit_lab(args=[accredited_audit_lab, "LAB-ISO17025-INDEPENDENT-AUDIT"])
+    contract.connect(accredited_audit_lab).attest_appeal_evidence(args=[oid, correct_supp_hash])
 
     # Appellant files appeal bound to accredited audit lab & committed hash
     contract.connect(researcher).appeal_verdict(
