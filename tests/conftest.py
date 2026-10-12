@@ -160,6 +160,16 @@ class _MockSimContract:
         self.foundry_lab_ids[str(l).lower()] = str(lab_id)
         return _MockTxResult(None)
 
+    def set_cooling_off_seconds(self, args):
+        self.default_cooling_off_seconds = args[0]
+        return _MockTxResult(None)
+
+    def set_order_cooling_off(self, args):
+        oid, sec = args
+        if oid in self.orders:
+            self.orders[oid]["cooling_off_seconds"] = str(sec)
+        return _MockTxResult(None)
+
     def order_synthesis(self, args, value=0):
         self.order_counter += 1
         oid = self.order_counter
@@ -460,8 +470,19 @@ class _MockSimContract:
             raise ValueError("Bio order is not in DISPUTED status.")
         if o["verdict"] == "BIO_SYNTHESIS_VERIFIED":
             o["status"] = 3
+        return _MockTxResult(None)
+
+    def finalize_settlement(self, args):
+        oid = args[0]
+        o = self.orders[oid]
+        if o["status"] != 2:
+            raise ValueError("Bio order is not awaiting settlement payout.")
+        if o["verdict"] == "BIO_SYNTHESIS_VERIFIED":
+            o["status"] = 3  # STATUS_VERIFIED_PAID
+        elif o["verdict"] == "BIOHAZARD_BLOCKED":
+            o["status"] = 4  # STATUS_BIOHAZARD_SLASHED
         else:
-            o["status"] = 5
+            o["status"] = 5  # STATUS_DEFECTIVE_REFUNDED
         return _MockTxResult(None)
 
     def verify_order_agreement(self, args):

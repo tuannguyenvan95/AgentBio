@@ -8,7 +8,7 @@ export const STUDIONET_RPC_URL = 'https://studio.genlayer.com/api';
 export const STUDIO_URL = 'https://studio.genlayer.com';
 
 // Default deployed contract address (updated via UI or localStorage)
-export const DEFAULT_CONTRACT_ADDRESS = '0x52eCC83bceB5B9154FFce236935505Cd41A5CC1A';
+export const DEFAULT_CONTRACT_ADDRESS = '0x393Dcc177aC202e2ccD01ec76303E557bfc4d43A';
 
 export function getSavedContractAddress(): string {
   if (typeof window !== 'undefined') {
@@ -17,6 +17,7 @@ export function getSavedContractAddress(): string {
       if (
         stored &&
         stored.trim().startsWith('0x') &&
+        stored.trim() !== '0x52eCC83bceB5B9154FFce236935505Cd41A5CC1A' &&
         stored.trim() !== '0xD89bF46b5Ac5f096288647EB8FcaE12F6C7B7f16' &&
         stored.trim() !== '0x567A9F625931Da69fd662a8a0F7ad4FF8276fb7D' &&
         stored.trim() !== '0xBF72c8b8b761BA05a0de8FF012658EF3956B49D6' &&
@@ -328,7 +329,7 @@ export async function orderSynthesisOnChain(
   userAddress: string,
   targetProteinFunction: string,
   sequenceSpecUrl: string,
-  durationBlocks: number,
+  durationSeconds: number,
   depositWei: bigint,
   specEvidenceHash?: string,
   targetFoundry?: string
@@ -338,29 +339,43 @@ export async function orderSynthesisOnChain(
 
   let cleanHash = specEvidenceHash?.trim().toLowerCase();
   if (!cleanHash || cleanHash.length !== 64) {
-    try {
-      const resp = await fetch(sequenceSpecUrl.trim());
-      const body = await resp.text();
-      cleanHash = await computeSha256(body);
-    } catch {
-      cleanHash = await computeSha256(`${targetProteinFunction}:${sequenceSpecUrl}`);
+    const resp = await fetch(sequenceSpecUrl.trim());
+    if (!resp.ok) {
+      throw new Error(`Failed to fetch specification from URL (${resp.status}): Genuine content commitment requires reachable file.`);
     }
+    const body = await resp.text();
+    cleanHash = await computeSha256(body);
   }
 
-  const txHash = await client.writeContract({
-    address: contractAddress as `0x${string}`,
-    functionName: 'order_synthesis',
-    args: [
-      targetProteinFunction.trim(),
-      sequenceSpecUrl.trim(),
-      durationBlocks,
-      cleanHash,
-      targetFoundry || '0x0000000000000000000000000000000000000000'
-    ],
-    value: depositWei,
-  });
+  let txHash: string;
+  if (targetFoundry && targetFoundry.startsWith('0x') && targetFoundry !== '0x0000000000000000000000000000000000000000') {
+    txHash = await client.writeContract({
+      address: contractAddress as `0x${string}`,
+      functionName: 'order_synthesis_designated',
+      args: [
+        targetProteinFunction.trim(),
+        sequenceSpecUrl.trim(),
+        durationSeconds,
+        cleanHash,
+        targetFoundry
+      ],
+      value: depositWei,
+    });
+  } else {
+    txHash = await client.writeContract({
+      address: contractAddress as `0x${string}`,
+      functionName: 'order_synthesis',
+      args: [
+        targetProteinFunction.trim(),
+        sequenceSpecUrl.trim(),
+        durationSeconds,
+        cleanHash
+      ],
+      value: depositWei,
+    });
+  }
 
-  await client.waitForTransactionReceipt({ hash: txHash });
+  await (client.waitForTransactionReceipt as any)({ hash: txHash });
   return txHash;
 }
 
@@ -372,27 +387,25 @@ export async function submitSynthesisProofOnChain(
   userAddress: string,
   orderId: number,
   qcReportUrl: string,
-  qcEvidenceHash?: string,
-  labId?: string
+  qcEvidenceHash?: string
 ): Promise<string> {
   await ensureStudionet();
   const client = getGenLayerClient(userAddress);
 
   let cleanHash = qcEvidenceHash?.trim().toLowerCase();
   if (!cleanHash || cleanHash.length !== 64) {
-    try {
-      const resp = await fetch(qcReportUrl.trim());
-      const body = await resp.text();
-      cleanHash = await computeSha256(body);
-    } catch {
-      cleanHash = await computeSha256(`qc:${orderId}:${qcReportUrl}`);
+    const resp = await fetch(qcReportUrl.trim());
+    if (!resp.ok) {
+      throw new Error(`Failed to fetch QC report from URL (${resp.status}): Genuine QC content commitment requires reachable file.`);
     }
+    const body = await resp.text();
+    cleanHash = await computeSha256(body);
   }
 
   const txHash = await (client.writeContract as any)({
     address: contractAddress as `0x${string}`,
     functionName: 'submit_synthesis_proof',
-    args: [orderId, qcReportUrl.trim(), cleanHash, labId || 'LAB-GENLAYER-DELEGATE-01'],
+    args: [orderId, qcReportUrl.trim(), cleanHash],
     value: 0n,
   });
 
@@ -423,7 +436,7 @@ export async function adjudicateBiosecurityOnChain(
 }
 
 /**
- * Appeal verdict during 24-block cooling-off window with 10% bond
+ * Appeal verdict during cooling-off window with 10% bond
  */
 export async function appealVerdictOnChain(
   contractAddress: string,
@@ -438,10 +451,7 @@ export async function appealVerdictOnChain(
   const client = getGenLayerClient(userAddress);
 
   const effectiveLab = certifyingLab || '0xF34587A45C397281Ef6BDd839d4A1de2DEe393ad';
-  let cleanSuppHash = supplementalEvidenceHash?.trim().toLowerCase();
-  if (!cleanSuppHash || cleanSuppHash.length !== 64) {
-    cleanSuppHash = await computeSha256(`appeal:${orderId}:${disputeReason}`);
-  }
+  const cleanSuppHash = supplementalEvidenceHash?.trim().toLowerCase() || '0'.repeat(64);
 
   const txHash = await (client.writeContract as any)({
     address: contractAddress as `0x${string}`,
@@ -461,9 +471,7 @@ export async function adjudicateAppealOnChain(
   contractAddress: string,
   userAddress: string,
   orderId: number,
-  supplementalQcUrl: string,
-  supplementalEvidenceHash?: string,
-  certifyingLab?: string
+  supplementalQcUrl: string
 ): Promise<string> {
   await ensureStudionet();
   const client = getGenLayerClient(userAddress);
@@ -473,9 +481,7 @@ export async function adjudicateAppealOnChain(
     functionName: 'adjudicate_appeal',
     args: [
       orderId,
-      supplementalQcUrl.trim(),
-      supplementalEvidenceHash || '',
-      certifyingLab || '0x0000000000000000000000000000000000000000'
+      supplementalQcUrl.trim()
     ],
     value: 0n,
   });

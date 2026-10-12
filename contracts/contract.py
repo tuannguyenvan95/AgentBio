@@ -96,6 +96,7 @@ class Contract(gl.Contract):
     order_counter: u64
     owner: Address
     biosecurity_reserve: Address
+    default_cooling_off_seconds: bigint
     authorized_foundries: TreeMap[Address, bool]
     foundry_lab_ids: TreeMap[Address, str]
 
@@ -103,6 +104,7 @@ class Contract(gl.Contract):
         deployer = _get_sender()
         self.owner = deployer
         self.biosecurity_reserve = deployer
+        self.default_cooling_off_seconds = bigint(120)  # 2 minutes for testing & fast settlement
         self.total_bio_locked = bigint(0)
         self.total_orders_settled = u32(0)
         self.order_counter = u64(0)
@@ -134,6 +136,20 @@ class Contract(gl.Contract):
         if _addr_str(_get_sender()) != _addr_str(self.owner):
             raise ContractError("Only protocol owner can update biosecurity reserve.")
         self.biosecurity_reserve = new_reserve
+
+    @gl.public.write
+    def set_cooling_off_seconds(self, new_seconds: u64) -> None:
+        if _addr_str(_get_sender()) != _addr_str(self.owner):
+            raise ContractError("Only protocol owner can update cooling off period.")
+        self.default_cooling_off_seconds = bigint(int(new_seconds))
+
+    @gl.public.write
+    def set_order_cooling_off(self, order_id: u64, new_seconds: u64) -> None:
+        if _addr_str(_get_sender()) != _addr_str(self.owner):
+            raise ContractError("Only protocol owner can configure order cooling off window.")
+        if order_id not in self.orders:
+            raise ContractError(f"Bio order {int(order_id)} does not exist.")
+        self.orders[order_id].cooling_off_seconds = bigint(int(new_seconds))
 
     @gl.public.write
     def transfer_ownership(self, new_owner: Address) -> None:
@@ -232,7 +248,7 @@ class Contract(gl.Contract):
             created_at=now,
             expires_at=expires_at,
             audit_completed_at=bigint(0),
-            cooling_off_seconds=DEFAULT_COOLING_OFF_SECONDS,
+            cooling_off_seconds=self.default_cooling_off_seconds,
             created_at_block=u256(0),
             expires_at_block=u256(5000),
             audit_completed_block=u256(0),

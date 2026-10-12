@@ -2,7 +2,7 @@
 
 > **Track:** DeSci (Decentralized Science) / Biosecurity / Subjective Consensus  
 > **Target Network:** GenLayer Studionet (Chain ID: `61999` / `0xF1EF`, RPC: `https://studio.genlayer.com/api`)  
-> **Deployed Intelligent Contract:** `0x52eCC83bceB5B9154FFce236935505Cd41A5CC1A`  
+> **Authoritative Intelligent Contract:** `0x393Dcc177aC202e2ccD01ec76303E557bfc4d43A`  
 > **Live Production dApp:** [https://agentbio.vercel.app](https://agentbio.vercel.app)  
 > **GitHub Repository:** [https://github.com/tuannguyenvan95/AgentBio](https://github.com/tuannguyenvan95/AgentBio)  
 > **Hackathon Target:** Agent Tank Hackathon — Track: DeSci & Subjective Consensus  
@@ -70,27 +70,36 @@ stateDiagram-v2
 
 ---
 
-## 🧪 3. Bảng Kiểm Thử Hợp Đồng (`tests/`) & Giao Dịch Live StudioNet
+## 🧪 3. Bảng Kiểm Thử Hợp Đồng (`tests/`) & Bằng Chứng Giao Dịch Live StudioNet
 
-Tất cả **40 bài test** trong test suites được kiểm thử tự động và vượt qua **100%**:
-- `tests/test_agent_bio.py` (4 tests): Các kịch bản trọng yếu do Steward yêu cầu (Genuine content commitments, Retrieval failure separation, 80% fidelity enforcement, Accredited appeals).
-- `tests/test_agentbio.py` (13 tests): Kiểm tra cú pháp GenVM, storage struct, canary token, validator consensus, và behavioral simulation (settlement, cooling-off window, refund, Sybil defence).
+Tất cả **43 bài test** trong test suites được kiểm thử tự động và vượt qua **100%**:
+- `tests/test_adversarial_and_consensus.py` (3 tests): Validator fidelity threshold disagreement across 80%, offline/unavailable evidence aborts without forfeiture, on-chain financial multi-wallet settlement.
+- `tests/test_agent_bio.py` (4 tests): Genuine content commitments, retrieval failure aborts without penalty, independent 80% fidelity enforcement, accredited appeals.
+- `tests/test_agentbio.py` (13 tests): Cú pháp GenVM, storage struct, canary token, validator consensus, và behavioral simulation (settlement, cooling-off window, refund, Sybil defence).
 - `tests/test_biosecurity_evidence_and_appeal.py` (23 tests): Bao gồm các test đối kháng (Adversarial E2E Tests) kiểm tra bảo vệ Foundry chỉ định, chống bypass, cam kết bằng chứng băm kép.
 
 Để chạy toàn bộ kiểm thử:
 ```bash
-pytest tests/
+pytest tests/ -v
 ```
 
-### ⛓️ Bằng Chứng Giao Dịch Live On-Chain Trên GenLayer StudioNet:
-- **Deployed Contract:** `0x149E5B8B3D7392135F857403D7e0EF7cB3C2E315`
-- **Deploy Transaction:** `0xb7f6af2977cdae1288b85d27058eaf818a508fb81818693711100587c78f5c1b`
-- **Register Authorized Foundry:** `0x1fdc7ede554f9340548980e158c48e4c23bc01b73d148a68c1312be76e623379`
-- **Order Synthesis (64-hex Spec Hash):** `0x525b35e8452084f27ec10372b0e835f305ce39a7adcfeea84055d7d88bd4b4ab`
-- **Accept Synthesis Agreement:** `0xda4c5c49b28cc40b04934c131948a0df272bc38336e7cbecd6daf2b3167e57fe`
-- **Submit QC Proof (64-hex QC Hash):** `0xef6a47a761dba2ffd5b8dcb6166bcbf153c5b919188da4f29effb740beae2f64`
-- **Validator Consensus Adjudication:** `0xc2e20959e0220ffa015ae436cf42c2cdeba47b02ceed12c557bb8d5e421a5ef8` *(Rendered BIO_SYNTHESIS_VERIFIED, 100% Fidelity, 99% Confidence)*
-- **Order Synthesis #2 (Open Benchmark):** `0xf906c7d386134ba7d7de8a827d64ba4a791a0708d71e1b6538a5372de3075364`
+### ⛓️ Bảng Đối Chiếu Bằng Chứng Giao Dịch Thực Tế Trên GenLayer StudioNet:
+> **Authoritative Contract Address:** `0x393Dcc177aC202e2ccD01ec76303E557bfc4d43A`  
+> **Deployer / Researcher Account:** `0xF34587A45C397281Ef6BDd839d4A1de2DEe393ad`  
+> **Accredited Foundry Account:** `0x2f166C507c7fbd7885999207058a4BA6A2E49BaC`  
+
+| Bước Nghiệp Vụ | Tên Hàm Giao Dịch | Transaction Hash Trên StudioNet | Kết Quả Thực Thi |
+| :--- | :--- | :--- | :--- |
+| **0. Contract Deployment** | `Contract.__init__` | `0x879d3bcfa3c95990e1386ac0d5ae8e5556373012c03c217f4249a43fa76bf5c6` | Hợp đồng khởi tạo thành công, owner & reserve gán ngay trong constructor |
+| **1. Set Cooling-Off** | `set_cooling_off_seconds(5)` | `0x720fb34839f75eb787c6b76c502551b6ccbe4a347ee54ee0169b533157c23a39` | Cấu hình cửa sổ khiếu nại linh hoạt cho phép nghiệm thu nhanh |
+| **2. Register Foundry** | `register_foundry(...)` | `0xd895baf10ad4491877f5671e80899775626bb4016b98ed829708ce025d0ff2c6` | Cấp chứng nhận `ISO-17025-TWIST-BIOSYNTH-01` cho ví Foundry |
+| **3. Order Synthesis #1** | `order_synthesis_designated(...)` | `0xd2c8d8933e73f80b01d2e117b0fed3059e6fbe534183b2bd88fdcd927e8e6af0` | Khóa `0.015 GEN` ký quỹ + Gắn mã băm nội dung tài liệu 64-hex SHA-256 (`b78e...74dd`) |
+| **4. Accept Agreement** | `accept_synthesis_agreement(1)` | `0x8bda1dd389e9b9479f05559653365b20713c31c8d1332e5132848f930330b661` | Ví Foundry chấp thuận điều khoản hợp đồng song phương |
+| **5. Submit QC Proof** | `submit_synthesis_proof(1, ...)` | `0x6b3a23f72d293ee804c71e9c9e9226d28effafe737a42c28588087176ff118e0` | Nộp chứng nhận giải trình tự + Cam kết mã băm QC 64-hex SHA-256 |
+| **6. AI Jury Adjudication** | `adjudicate_biosecurity_and_qc(1)` | `0xe7e47d7c477bad84d0da494df34396f47d7dd16671b6329ea0003096e605616e` | Bồi thẩm đoàn AI đồng thuận: `BIO_SYNTHESIS_VERIFIED`, Độ khớp 100%, Tin cậy 100% |
+| **7. Clear Cooling-Off** | `set_order_cooling_off(1, 0)` | `0x66b45ca529540007b48b0d36a14d0c8af81c1599488a29b15e607eb119779a6a` | Cửa sổ làm nguội kết thúc, mở khóa giải ngân tài chính |
+| **8. Finalize Settlement** | `finalize_settlement(1)` | `0xabb2b6078547c37ef33b5901dff10569b2dac67fc73884580509a4c9bb61136d` | Nghiệm thu tài chính on-chain: Trạng thái cập nhật `STATUS_VERIFIED_PAID`, giải ngân Escrow |
+| **9. Order Synthesis #2** | `order_synthesis(...)` | `0x82c68b3eb31f6b9eff814c008006fa4aac18aa7000fd575086f38f8d201e8f14` | Mở đơn hàng sinh học tự do thứ 2 (CRISPR-Cas9 guide RNA), khóa `0.01 GEN` |
 
 ---
 

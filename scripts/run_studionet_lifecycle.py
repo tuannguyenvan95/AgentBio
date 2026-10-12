@@ -9,7 +9,7 @@ from genlayer_py.types import CalldataAddress
 
 RESEARCHER_PK = "0x1b807b1df022a40f872596b11565e6b6856547dc66996bd3d5a85b376ea3a0ef"
 FOUNDRY_PK = "0x8eb1e7db29f0b8932900fe3c90627ef8a9d48659d1d04fddf2a7369cfa670064"
-CONTRACT = "0x52eCC83bceB5B9154FFce236935505Cd41A5CC1A"
+CONTRACT = "0x393Dcc177aC202e2ccD01ec76303E557bfc4d43A"
 
 
 def fetch_and_hash(url: str) -> str:
@@ -24,7 +24,7 @@ def fetch_and_hash(url: str) -> str:
 
 def main():
     print("=" * 80, flush=True)
-    print("  AGENTBIO: COMPLETE ON-CHAIN LIFECYCLE EXECUTION ON GENLAYER STUDIONET  ", flush=True)
+    print("  AGENTBIO: COMPLETE ON-CHAIN FINANCIAL LIFECYCLE ON GENLAYER STUDIONET  ", flush=True)
     print("=" * 80, flush=True)
 
     r_acct = create_account(RESEARCHER_PK)
@@ -37,8 +37,20 @@ def main():
     print(f"[+] Foundry Account    : {f_acct.address} (Balance: {f_client.get_balance(f_acct.address)/1e18:.4f} GEN)", flush=True)
 
     lifecycle_txs = {}
+    financial_audit = {}
 
-    # STEP 1: Register Foundry in Accreditation Registry
+    # STEP 0: Configure Cooling-Off to Minimal for Fast Settlement
+    print("\n--- STEP 0: Configure Cooling-Off Window for Prompt Settlement ---", flush=True)
+    tx_cooling = r_client.write_contract(
+        address=CONTRACT,
+        function_name="set_cooling_off_seconds",
+        args=[5]
+    )
+    print(f"[+] Set Cooling-Off Tx: {tx_cooling}", flush=True)
+    r_client.wait_for_transaction_receipt(tx_cooling)
+    lifecycle_txs["set_cooling_off_seconds"] = str(tx_cooling)
+
+    # STEP 1: Register Authorized Foundry in Accreditation Registry
     print("\n--- STEP 1: Register Authorized Foundry in Registry ---", flush=True)
     is_auth = r_client.read_contract(address=CONTRACT, function_name="is_authorized_foundry", args=[CalldataAddress(f_acct.address)])
     if not is_auth:
@@ -55,27 +67,28 @@ def main():
     else:
         print(f"[+] Foundry {f_acct.address} is already accredited in registry.", flush=True)
 
-    # STEP 2: Commission Designated Synthesis Order with Genuine 64-Hex Content Commitment
+    # STEP 2: Commission Designated Synthesis Order with Genuine 64-Hex SHA-256
     print("\n--- STEP 2: Commission DNA Synthesis Order (Order #1) ---", flush=True)
     spec_url1 = "https://raw.githubusercontent.com/tuannguyenvan95/AgentBio/main/data/anti_il6_receptor.fasta"
     spec_hash1 = fetch_and_hash(spec_url1)
 
+    ESCROW_AMOUNT = int(0.015 * 1e18)  # 0.015 GEN escrow
     tx_order1 = r_client.write_contract(
         address=CONTRACT,
         function_name="order_synthesis_designated",
-        value=int(0.015 * 1e18),  # 0.015 GEN escrow
+        value=ESCROW_AMOUNT,
         args=[
             "Monoclonal antibody IgG1 heavy chain targeting IL-6 cytokine receptor for cytokine storm suppression",
             spec_url1,
             86400 * 7,
             spec_hash1,
-            CalldataAddress(f_acct.address)  # Designated accredited target foundry
+            CalldataAddress(f_acct.address)
         ]
     )
     print(f"[+] Order Synthesis Tx: {tx_order1}", flush=True)
     r_client.wait_for_transaction_receipt(tx_order1)
     lifecycle_txs["order_synthesis_1"] = str(tx_order1)
-    print("[+] Order #1 confirmed on-chain!", flush=True)
+    print("[+] Order #1 escrowed on-chain!", flush=True)
 
     # STEP 3: Foundry Accepts Bilateral Synthesis Agreement
     print("\n--- STEP 3: Authorized Foundry Accepts Bilateral Agreement ---", flush=True)
@@ -116,15 +129,50 @@ def main():
     lifecycle_txs["adjudicate_biosecurity"] = str(tx_adjudicate)
     print("[+] Biosecurity & QC consensus adjudication completed on-chain!", flush=True)
 
-    # STEP 6: Commission Open Synthesis Order (Order #2)
-    print("\n--- STEP 6: Commission Open Synthesis Order (Order #2) ---", flush=True)
+    # STEP 6: Set Order Cooling-Off to 0 & Execute Financial Settlement
+    print("\n--- STEP 6: Execute On-Chain Financial Escrow Settlement ---", flush=True)
+    tx_order_cooling = r_client.write_contract(
+        address=CONTRACT,
+        function_name="set_order_cooling_off",
+        args=[1, 0]
+    )
+    print(f"[+] Clear Cooling-Off Window Tx: {tx_order_cooling}", flush=True)
+    r_client.wait_for_transaction_receipt(tx_order_cooling)
+    lifecycle_txs["clear_cooling_off"] = str(tx_order_cooling)
+
+    time.sleep(2)
+    foundry_bal_before = f_client.get_balance(f_acct.address)
+    print(f"[+] Foundry Balance Before Settlement: {foundry_bal_before / 1e18:.6f} GEN", flush=True)
+
+    tx_settle = r_client.write_contract(
+        address=CONTRACT,
+        function_name="finalize_settlement",
+        args=[1]
+    )
+    print(f"[+] Finalize Settlement Tx: {tx_settle}", flush=True)
+    r_client.wait_for_transaction_receipt(tx_settle)
+    lifecycle_txs["finalize_settlement"] = str(tx_settle)
+
+    time.sleep(2)
+    foundry_bal_after = f_client.get_balance(f_acct.address)
+    print(f"[+] Foundry Balance After Settlement : {foundry_bal_after / 1e18:.6f} GEN", flush=True)
+    net_movement = (foundry_bal_after - foundry_bal_before) / 1e18
+    print(f"[+] Net GEN Movement to Foundry      : +{net_movement:.6f} GEN", flush=True)
+
+    financial_audit["escrow_amount_gen"] = 0.015
+    financial_audit["foundry_before_gen"] = foundry_bal_before / 1e18
+    financial_audit["foundry_after_gen"] = foundry_bal_after / 1e18
+    financial_audit["net_movement_gen"] = net_movement
+
+    # STEP 7: Commission Open Synthesis Order (Order #2)
+    print("\n--- STEP 7: Commission Open Synthesis Order (Order #2) ---", flush=True)
     spec_url2 = "https://raw.githubusercontent.com/tuannguyenvan95/AgentBio/main/data/cas9_bcl11a.fasta"
     spec_hash2 = fetch_and_hash(spec_url2)
 
     tx_order2 = r_client.write_contract(
         address=CONTRACT,
         function_name="order_synthesis",
-        value=int(0.01 * 1e18),  # 0.01 GEN escrow
+        value=int(0.01 * 1e18),
         args=[
             "CRISPR-Cas9 guide RNA targeting BCL11A erythroid enhancer for therapeutic hemoglobin reactivation",
             spec_url2,
@@ -137,8 +185,8 @@ def main():
     lifecycle_txs["order_synthesis_2"] = str(tx_order2)
     print("[+] Order #2 confirmed on-chain!", flush=True)
 
-    # STEP 7: Read On-Chain State & Output Evidence Record
-    print("\n--- STEP 7: Final On-Chain Verification & Evidence Record ---", flush=True)
+    # STEP 8: Read Final On-Chain State & Output Evidence
+    print("\n--- STEP 8: Final On-Chain Verification & Evidence Record ---", flush=True)
     stats = r_client.read_contract(address=CONTRACT, function_name="get_stats", args=[])
     print(f"[+] Protocol Stats: {stats}", flush=True)
     count = r_client.read_contract(address=CONTRACT, function_name="get_order_count", args=[])
@@ -146,12 +194,14 @@ def main():
     order1 = r_client.read_contract(address=CONTRACT, function_name="get_order", args=[1])
     print(f"[+] Order #1 Details: {order1}", flush=True)
 
-    # Save evidence file
     evidence_path = os.path.join(os.path.dirname(__file__), "studionet_lifecycle_txs.json")
     with open(evidence_path, "w") as f:
         json.dump({
             "contract_address": CONTRACT,
-            "deploy_tx": "0xb7f6af2977cdae1288b85d27058eaf818a508fb81818693711100587c78f5c1b",
+            "deploy_tx": "0x879d3bcfa3c95990e1386ac0d5ae8e5556373012c03c217f4249a43fa76bf5c6",
+            "deployer": r_acct.address,
+            "foundry": f_acct.address,
+            "financial_audit": financial_audit,
             "lifecycle_transactions": lifecycle_txs,
             "stats": json.loads(stats) if isinstance(stats, str) else stats,
             "order_1": json.loads(order1) if isinstance(order1, str) else order1
