@@ -132,6 +132,11 @@ class _MockSimContract:
         }
         self.claimable_balances = {}
 
+    def _safe_transfer(self, recipient, amount):
+        if int(amount) <= 0:
+            return True
+        return True
+
     def connect(self, account):
         self.caller = account
         return self

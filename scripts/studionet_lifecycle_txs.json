@@ -1,27 +1,28 @@
 {
-  "contract_address": "0x32cE69A105d1AFe81Ff07294E3A656aa5c8Dd9C9",
-  "deploy_tx": "0x84f4cd6196b53e7e8612c80196e34d452a8c5b22e3275102cb349873b5f26d02",
-  "deployer": "0xF34587A45C397281Ef6BDd839d4A1de2DEe393ad",
+  "contract_address": "0x5001ECA0bEd26d0dDC83aE9d352eDa569C78705E",
+  "deploy_tx": "0x879d3bcfa3c95990e1386ac0d5ae8e5556373012c03c217f4249a43fa76bf5c6",
+  "deployer": "0x0b0b3e21bbe0a8e2e51525b9c14dc656a3a32056",
   "foundry": "0x2f166C507c7fbd7885999207058a4BA6A2E49BaC",
-  "biosecurity_reserve": "0xF34587A45C397281Ef6BDd839d4A1de2DEe393ad",
+  "biosecurity_reserve": "0x0b0b3e21bbe0a8e2e51525b9c14dc656a3a32056",
   "lifecycle_transactions": {
-    "set_cooling_off_seconds": "0xfb13128723a157cb5747743fc104cd0f3626a1172d28b95118e6e8656cf18089",
-    "register_foundry": "0x783a57b61db339e3465471fdd046ff505913caeafde469c38eb9b7770e195371",
-    "order_synthesis_1": "0xefe2379cbd815a4c6391291f9066085de3e239c7b45902522338370298dbcf18",
-    "accept_synthesis_agreement_1": "0xd90883c9ba316b0a677175c27651889caf94713ee39105e89fd419beae5a017e",
-    "submit_synthesis_proof_1": "0x877068517bf187c3359a8302afdd4d1086141668a70bb1f010bb4dba09060cd5",
-    "adjudicate_biosecurity_1": "0x3becee6ca8b1b3ac6254665f85eb07b80d3973f5780784805309c0a58efe2330",
-    "finalize_settlement_1": "0x8d282502c9c8851ed987f7cdbc4b964fadd027f0f527c54bd462be8f0a7421a0",
-    "order_synthesis_2": "0xa9fb8a6fec36410b1613227bd8a93b7d4695d5dd4a2ff1018215caef39d396ee",
-    "accept_synthesis_agreement_2": "0x28d52c573b67619008935f85cb77d172c569bab7039ab11b62a3f6353e51195b",
-    "submit_synthesis_proof_2": "0xc7c8dca5d15ce0dc8dc52ca3870f1c5aa34a6d6fe3de00bd4efeb59a6948f26e",
-    "adjudicate_defective_2": "0xadc8d696fccbc30ce1b184c9ae9578ba5029a17664449b8ff952460a0b2b8885",
-    "finalize_refund_2": "0x16d73ef7977f6d66178bed8a74903cd819fd84ae2557ae9775ab7ebfa3eda367",
-    "order_biohazard_3": "0xee7e7de285d1a5589e7db6086ebbc79b17876066d439f0c060fd28192d00ee49",
-    "accept_synthesis_agreement_3": "0x1ee594917bb4f3ffa8dbb57386f6bc059ad780ad0ac9af4489d1c3f78f8635f2",
-    "submit_synthesis_proof_3": "0x0082549e7e405ca3d16e8ba065684daead667d34bc94b7ed5f87ed954df19962",
-    "adjudicate_biohazard_3": "0x49ee8259108e3f859e0ffdd5a24b0cab8667abbf87b88fa87e704af1467f0e2b",
-    "finalize_slash_3": "0xd4b0ea9966aecf7ae8a66df106604220200dd6168c956c6dc5b15430c2aff096"
+    "contract_deployment": "0x879d3bcfa3c95990e1386ac0d5ae8e5556373012c03c217f4249a43fa76bf5c6",
+    "set_cooling_off_seconds": "0x720fb34839f75eb787c6b76c502551b6ccbe4a347ee54ee0169b533157c23a39",
+    "register_foundry": "0xd895baf10ad4491877f5671e80899775626bb4016b98ed829708ce025d0ff2c6",
+    "order_synthesis_1": "0xd2c8d8933e73f80b01d2e117b0fed3059e6fbe534183b2bd88fdcd927e8e6af0",
+    "accept_synthesis_agreement_1": "0x8bda1dd389e9b9479f05559653365b20713c31c8d1332e5132848f930330b661",
+    "submit_synthesis_proof_1": "0x6b3a23f72d293ee804c71e9c9e9226d28effafe737a42c28588087176ff118e0",
+    "adjudicate_biosecurity_1": "0xe7e47d7c477bad84d0da494df34396f47d7dd16671b6329ea0003096e605616e",
+    "finalize_settlement_1": "0xabb2b6078547c37ef33b5901dff10569b2dac67fc73884580509a4c9bb61136d",
+    "order_synthesis_2": "0x82c68b3eb31f6b9eff814c008006fa4aac18aa7000fd575086f38f8d201e8f14",
+    "accept_synthesis_agreement_2": "0x675f7cea86af2d4655b67b4ff755341c776304868cf77ff6877f5e6b26a8de65",
+    "submit_synthesis_proof_2": "0xd28e67ca78e3ad70aa4cc670a4725cb40130d3babf3015efcf45ede3f4db808b",
+    "adjudicate_defective_2": "0x92d70378653840704d6b56b9b9cf1ba7687ae6ecfaf997be0f5b19c5548c59d8",
+    "finalize_refund_2": "0x31262d9e93e7f60e1e83df78a4c25ca438979050a35e4fc763d06f506539cf2d",
+    "order_biohazard_3": "0xfe1ee6f98ebc17939a50dcdcfd9e496642f4af67a4dfe6f347c8cadab6c74b91",
+    "accept_synthesis_agreement_3": "0x32d6c01826e8f54608b5c570bf1b51a1e6f554d0f905b42ed6a0c2812b2a2787",
+    "submit_synthesis_proof_3": "0xf1048f6825ea9f254d5349fc68fc702c63047925fd14ad343ff3fa2da40740e0",
+    "adjudicate_biohazard_3": "0xaf01aa5bf0b49ecd766b451267eba73802403bbf59b5741c36bb8af79bbc2761",
+    "finalize_slash_3": "0x88bf4642bd668ea9684f8b597a640c922e83174b77648b544b1a1206b3e36ca0"
   },
   "financial_audit": {
     "scenario_1_foundry_payout": {
@@ -31,8 +32,8 @@
       "escrow_amount_gen": 0.015,
       "recipient_wallet": "0x2f166C507c7fbd7885999207058a4BA6A2E49BaC",
       "child_transfer_executed": true,
-      "child_transfer_call": "gl.get_contract_at(foundry).emit_transfer(value=15000000000000000)",
-      "finalize_tx": "0x8d282502c9c8851ed987f7cdbc4b964fadd027f0f527c54bd462be8f0a7421a0",
+      "child_transfer_call": "self._safe_transfer(foundry, 15000000000000000)",
+      "finalize_tx": "0xabb2b6078547c37ef33b5901dff10569b2dac67fc73884580509a4c9bb61136d",
       "execution_status": "FINALIZED"
     },
     "scenario_2_researcher_refund": {
@@ -42,8 +43,8 @@
       "escrow_amount_gen": 0.01,
       "recipient_wallet": "0xF34587A45C397281Ef6BDd839d4A1de2DEe393ad",
       "child_transfer_executed": true,
-      "child_transfer_call": "gl.get_contract_at(researcher).emit_transfer(value=10000000000000000)",
-      "finalize_tx": "0x16d73ef7977f6d66178bed8a74903cd819fd84ae2557ae9775ab7ebfa3eda367",
+      "child_transfer_call": "self._safe_transfer(researcher, 10000000000000000)",
+      "finalize_tx": "0x31262d9e93e7f60e1e83df78a4c25ca438979050a35e4fc763d06f506539cf2d",
       "execution_status": "FINALIZED"
     },
     "scenario_3_reserve_forfeiture": {
@@ -51,10 +52,10 @@
       "verdict": "BIOHAZARD_BLOCKED",
       "status": "STATUS_BIOHAZARD_SLASHED",
       "escrow_amount_gen": 0.01,
-      "recipient_wallet": "0xF34587A45C397281Ef6BDd839d4A1de2DEe393ad",
+      "recipient_wallet": "0x0b0b3e21bbe0a8e2e51525b9c14dc656a3a32056",
       "child_transfer_executed": true,
-      "child_transfer_call": "gl.get_contract_at(reserve).emit_transfer(value=10000000000000000)",
-      "finalize_tx": "0xd4b0ea9966aecf7ae8a66df106604220200dd6168c956c6dc5b15430c2aff096",
+      "child_transfer_call": "self._safe_transfer(reserve, 10000000000000000)",
+      "finalize_tx": "0x88bf4642bd668ea9684f8b597a640c922e83174b77648b544b1a1206b3e36ca0",
       "execution_status": "FINALIZED"
     }
   },
@@ -62,8 +63,8 @@
     "total_orders": 3,
     "total_bio_locked": "0",
     "total_orders_settled": 3,
-    "owner": "0xf34587a45c397281ef6bdd839d4a1de2dee393ad",
-    "biosecurity_reserve": "0xf34587a45c397281ef6bdd839d4a1de2dee393ad"
+    "owner": "0x0b0b3e21bbe0a8e2e51525b9c14dc656a3a32056",
+    "biosecurity_reserve": "0x0b0b3e21bbe0a8e2e51525b9c14dc656a3a32056"
   },
   "order_1": {
     "order_id": 1,
