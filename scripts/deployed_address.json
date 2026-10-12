@@ -1,6 +1,5 @@
 {
-  "contract_address": "0x393Dcc177aC202e2ccD01ec76303E557bfc4d43A",
-  "deploy_tx": "0x879d3bcfa3c95990e1386ac0d5ae8e5556373012c03c217f4249a43fa76bf5c6",
-  "deployer": "0xF34587A45C397281Ef6BDd839d4A1de2DEe393ad",
+  "contract_address": "0x5001ECA0bEd26d0dDC83aE9d352eDa569C78705E",
+  "deployer": "0x0b0b3e21bbe0a8e2e51525b9c14dc656a3a32056",
   "network": "GenLayer StudioNet (Chain ID: 61999)"
 }

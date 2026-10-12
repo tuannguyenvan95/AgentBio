@@ -2,7 +2,7 @@
 
 > **Track:** DeSci (Decentralized Science) / Biosecurity / Subjective Consensus  
 > **Target Network:** GenLayer Studionet (Chain ID: `61999` / `0xF1EF`, RPC: `https://studio.genlayer.com/api`)  
-> **Authoritative Intelligent Contract:** `0x393Dcc177aC202e2ccD01ec76303E557bfc4d43A`  
+> **Authoritative Intelligent Contract:** `0x5001ECA0bEd26d0dDC83aE9d352eDa569C78705E`  
 > **Live Production dApp:** [https://agentbio.vercel.app](https://agentbio.vercel.app)  
 > **GitHub Repository:** [https://github.com/tuannguyenvan95/AgentBio](https://github.com/tuannguyenvan95/AgentBio)  
 > **Hackathon Target:** Agent Tank Hackathon — Track: DeSci & Subjective Consensus  
@@ -84,8 +84,8 @@ pytest tests/ -v
 ```
 
 ### ⛓️ Bảng Đối Chiếu Bằng Chứng Giao Dịch Thực Tế Trên GenLayer StudioNet:
-> **Authoritative Contract Address:** `0x393Dcc177aC202e2ccD01ec76303E557bfc4d43A`  
-> **Deployer / Researcher Account:** `0xF34587A45C397281Ef6BDd839d4A1de2DEe393ad`  
+> **Authoritative Contract Address:** `0x5001ECA0bEd26d0dDC83aE9d352eDa569C78705E`  
+> **Deployer / Protocol Owner Account:** `0x0b0b3e21bbe0a8e2e51525b9c14dc656a3a32056`  
 > **Accredited Foundry Account:** `0x2f166C507c7fbd7885999207058a4BA6A2E49BaC`  
 
 #### 🔹 1. Khởi Tạo Hợp Đồng & Đăng Ký Foundry

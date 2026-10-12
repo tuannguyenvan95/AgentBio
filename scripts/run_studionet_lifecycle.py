@@ -9,7 +9,7 @@ from genlayer_py.types import CalldataAddress
 
 RESEARCHER_PK = "0x1b807b1df022a40f872596b11565e6b6856547dc66996bd3d5a85b376ea3a0ef"
 FOUNDRY_PK = "0x8eb1e7db29f0b8932900fe3c90627ef8a9d48659d1d04fddf2a7369cfa670064"
-CONTRACT = "0x393Dcc177aC202e2ccD01ec76303E557bfc4d43A"
+CONTRACT = "0x5001ECA0bEd26d0dDC83aE9d352eDa569C78705E"
 
 
 def fetch_and_hash(url: str) -> str:
