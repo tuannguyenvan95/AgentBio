@@ -44,6 +44,7 @@ import {
   orderSynthesisOnChain,
   submitSynthesisProofOnChain,
   adjudicateBiosecurityOnChain,
+  attestAppealEvidenceOnChain,
   appealVerdictOnChain,
   adjudicateAppealOnChain,
   finalizeSettlementOnChain,
@@ -262,17 +263,77 @@ export function App() {
     }
   };
 
-  const handleAppeal = async (orderId: number, disputeReason: string, bondWei: bigint) => {
+  const handleAttestAppealEvidence = async (orderId: number, evidenceHash: string): Promise<string> => {
+    if (!account) {
+      await connectWallet();
+      return '';
+    }
+    try {
+      setIsProcessingAction(true);
+      setStatusMessage({
+        type: 'info',
+        text: `Accredited laboratory attesting appeal evidence for Order #${orderId}...`,
+      });
+      const tx = await attestAppealEvidenceOnChain(contractAddress, account, orderId, evidenceHash);
+      setStatusMessage({
+        type: 'success',
+        text: `Laboratory attestation recorded for Order #${orderId}! Tx: ${tx.slice(0, 10)}...`,
+      });
+      await loadData();
+      return tx;
+    } catch (err: any) {
+      console.error('Attestation error:', err);
+      setStatusMessage({
+        type: 'error',
+        text: err?.message || 'Laboratory attestation failed on Studionet.',
+      });
+      throw err;
+    } finally {
+      setIsProcessingAction(false);
+    }
+  };
+
+  const handleAppeal = async (
+    orderId: number,
+    disputeReason: string,
+    bondWei: bigint,
+    certifyingLab: string,
+    supplementalEvidenceHash: string
+  ) => {
     if (!account) {
       await connectWallet();
       return;
     }
-    const tx = await appealVerdictOnChain(contractAddress, account, orderId, disputeReason, bondWei);
-    setStatusMessage({
-      type: 'success',
-      text: `Appeal filed and 10% bond staked for Order #${orderId}! Tx: ${tx.slice(0, 10)}...`,
-    });
-    await loadData();
+    try {
+      setIsProcessingAction(true);
+      setStatusMessage({
+        type: 'info',
+        text: `Staking 10% bond and lodging formal appeal for Order #${orderId}...`,
+      });
+      const tx = await appealVerdictOnChain(
+        contractAddress,
+        account,
+        orderId,
+        disputeReason,
+        bondWei,
+        certifyingLab,
+        supplementalEvidenceHash
+      );
+      setStatusMessage({
+        type: 'success',
+        text: `Appeal filed and 10% bond staked for Order #${orderId}! Tx: ${tx.slice(0, 10)}...`,
+      });
+      await loadData();
+    } catch (err: any) {
+      console.error('Appeal error:', err);
+      setStatusMessage({
+        type: 'error',
+        text: err?.message || 'Failed to file appeal on Studionet.',
+      });
+      throw err;
+    } finally {
+      setIsProcessingAction(false);
+    }
   };
 
   const handleAdjudicateAppeal = async (orderId: number, supplementalQcUrl: string) => {
@@ -661,6 +722,8 @@ export function App() {
         }}
         order={activeModalOrder}
         onSubmit={handleAppeal}
+        onAttest={handleAttestAppealEvidence}
+        userAddress={account}
       />
 
       <AppellateModal

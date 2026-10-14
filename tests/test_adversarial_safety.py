@@ -420,26 +420,157 @@ def test_timestamp_failure_aborts_transaction(contract_source):
     assert 'raise ContractError("Authoritative timestamp unavailable.' in contract_source
 
 
-def test_failed_outbound_transfer_safe_recovery(contract, researcher):
+def test_failed_outbound_transfer_safe_recovery(contract, researcher, foundry, client):
     """
     Requirement 5: Safe recovery mechanism.
-    If an outbound transfer fails or is deferred, funds are credited to claimable_balances.
-    The recipient can claim via claim_payout(), preventing lost entitlements and duplicate payouts.
+    Induces a failed outbound transfer during settlement (e.g. smart contract recipient
+    rejection or network failure). Verifies that _safe_transfer catches the failure,
+    dynamically credits claimable_balances, marks the order settled, and allows the recipient
+    to recover funds safely via claim_payout() while preventing duplicate payouts.
     """
-    # Simulate a pending claimable balance for researcher
-    contract.claimable_balances[researcher.lower()] = 500000
+    contract.connect(contract.owner).register_foundry(args=[foundry, "LAB-SAFE-RECOVER-01"]).transact()
+    contract.connect(contract.owner).set_cooling_off_seconds(args=[0]).transact()
 
-    bal_res = contract.get_claimable_balance(args=[researcher]).call()
-    assert int(bal_res) == 500000
+    spec_text = ">monoclonal_antibody_spec\nATGCGATCGATCGATC"
+    qc_text = ">defective_delivery_qc\nATGCGATCGTTTTTTT"
+    spec_hash = _sha256(spec_text)
+    qc_hash = _sha256(qc_text)
+    escrow_amount = 500000
 
-    # Claim payout
+    # 1. Researcher places synthesis order with 500,000 wei escrow
+    order_id = contract.connect(researcher).order_synthesis(
+        args=["Monoclonal antibody IgG1 sequence", "https://biosecure.io/spec_def.fasta", 604800, spec_hash]
+    ).transact(value=escrow_amount)
+
+    # 2. Foundry accepts and submits defective sequencing QC proof
+    contract.connect(foundry).accept_synthesis_agreement(args=[order_id]).transact()
+    contract.connect(foundry).submit_synthesis_proof(
+        args=[order_id, "https://biosecure.io/qc_def.txt", qc_hash]
+    ).transact()
+
+    client.provider.make_request(
+        method="sim_installMocks",
+        params={
+            "llm_mocks": {
+                ".*": json.dumps({
+                    "canary": "CANARY_AGENT_BIO_SAFETY_V1",
+                    "verdict": "SEQUENCE_DEFECTIVE",
+                    "confidence": 95,
+                    "fidelity_score": 40,
+                    "reason": "Truncation and frameshift mutations detected."
+                })
+            },
+            "web_mocks": {
+                "https://biosecure.io/spec_def.fasta": {"status": 200, "body": spec_text},
+                "https://biosecure.io/qc_def.txt": {"status": 200, "body": qc_text}
+            }
+        }
+    )
+
+    # 3. Adjudicate order to STATUS_AWAITING_PAYOUT (verdict: SEQUENCE_DEFECTIVE)
+    contract.connect(researcher).adjudicate_biosecurity_and_qc(args=[order_id]).transact()
+    order_data = json.loads(contract.get_order(args=[order_id]).call())
+    assert order_data["status"] == 2  # STATUS_AWAITING_PAYOUT
+    assert order_data["verdict"] == "SEQUENCE_DEFECTIVE"
+
+    # Prior to settlement, claimable balance is 0
+    assert int(contract.get_claimable_balance(args=[researcher]).call()) == 0
+
+    # 4. INDUCE OUTBOUND TRANSFER FAILURE:
+    # Mark researcher as failing outbound transfers (simulating unpayable recipient contract / network drop)
+    contract.simulate_transfer_failure(researcher)
+
+    # 5. Execute finalize_settlement
+    # The transaction MUST succeed without reverting; _safe_transfer catches failure and credits claimable_balances
+    contract.connect(researcher).finalize_settlement(args=[order_id]).transact()
+
+    # Order must be cleanly settled (status STATUS_DEFECTIVE_REFUNDED, escrow zeroed)
+    settled_order = json.loads(contract.get_order(args=[order_id]).call())
+    assert settled_order["status"] == 5  # STATUS_DEFECTIVE_REFUNDED
+    assert int(settled_order["escrow_amount"]) == 0
+
+    # 6. Verify that claimable_balances was dynamically credited by _safe_transfer
+    claimable = int(contract.get_claimable_balance(args=[researcher]).call())
+    assert claimable == escrow_amount, f"Expected {escrow_amount} in claimable balance, got {claimable}"
+
+    # 7. Recipient safely pulls payment via claim_payout()
     contract.connect(researcher).claim_payout().transact()
 
     # Balance is now zeroed
-    bal_after = contract.get_claimable_balance(args=[researcher]).call()
-    assert int(bal_after) == 0
+    assert int(contract.get_claimable_balance(args=[researcher]).call()) == 0
 
-    # Second claim must revert (no duplicate payout)
+    # 8. Second claim must revert (prevents duplicate payouts)
     with pytest.raises(Exception) as exc:
         contract.connect(researcher).claim_payout().transact()
     assert "no claimable balance" in str(exc.value).lower()
+
+
+def test_failed_outbound_transfer_foundry_payout_safe_recovery(contract, researcher, foundry, client):
+    """
+    Requirement 5: Safe recovery mechanism for Foundry payouts.
+    Induces a failed outbound transfer during verified settlement release to Foundry.
+    Verifies that _safe_transfer catches the failure, credits claimable_balances[foundry],
+    and allows Foundry to claim funds cleanly without double-spending.
+    """
+    contract.connect(contract.owner).register_foundry(args=[foundry, "LAB-SAFE-FOUNDRY-01"]).transact()
+    contract.connect(contract.owner).set_cooling_off_seconds(args=[0]).transact()
+
+    spec_text = ">verified_monoclonal_antibody\nATGCGATCGATCGATC"
+    qc_text = ">verified_monoclonal_antibody\nATGCGATCGATCGATC"
+    spec_hash = _sha256(spec_text)
+    qc_hash = _sha256(qc_text)
+    escrow_amount = 750000
+
+    order_id = contract.connect(researcher).order_synthesis(
+        args=["Therapeutic IgG1 construct", "https://biosecure.io/spec_ver.fasta", 604800, spec_hash]
+    ).transact(value=escrow_amount)
+
+    contract.connect(foundry).accept_synthesis_agreement(args=[order_id]).transact()
+    contract.connect(foundry).submit_synthesis_proof(
+        args=[order_id, "https://biosecure.io/qc_ver.txt", qc_hash]
+    ).transact()
+
+    client.provider.make_request(
+        method="sim_installMocks",
+        params={
+            "llm_mocks": {
+                ".*": json.dumps({
+                    "canary": "CANARY_AGENT_BIO_SAFETY_V1",
+                    "verdict": "BIO_SYNTHESIS_VERIFIED",
+                    "confidence": 99,
+                    "fidelity_score": 100,
+                    "reason": "100% full-length match verified."
+                })
+            },
+            "web_mocks": {
+                "https://biosecure.io/spec_ver.fasta": {"status": 200, "body": spec_text},
+                "https://biosecure.io/qc_ver.txt": {"status": 200, "body": qc_text}
+            }
+        }
+    )
+
+    contract.connect(researcher).adjudicate_biosecurity_and_qc(args=[order_id]).transact()
+
+    # Induce outbound transfer failure for Foundry
+    contract.simulate_transfer_failure(foundry)
+
+    # Finalize settlement
+    contract.connect(researcher).finalize_settlement(args=[order_id]).transact()
+
+    settled_order = json.loads(contract.get_order(args=[order_id]).call())
+    assert settled_order["status"] == 3  # STATUS_VERIFIED_PAID
+    assert int(settled_order["escrow_amount"]) == 0
+
+    # Verify claimable balance credited to foundry
+    claimable = int(contract.get_claimable_balance(args=[foundry]).call())
+    assert claimable == escrow_amount
+
+    # Foundry claims payout
+    contract.connect(foundry).claim_payout().transact()
+    assert int(contract.get_claimable_balance(args=[foundry]).call()) == 0
+
+    # Second claim must revert
+    with pytest.raises(Exception) as exc:
+        contract.connect(foundry).claim_payout().transact()
+    assert "no claimable balance" in str(exc.value).lower()
+

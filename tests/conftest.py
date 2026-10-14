@@ -83,10 +83,14 @@ class _MockCallResult:
 
 
 class _MockTxResult:
-    def __init__(self, return_value):
+    def __init__(self, return_value, on_transact=None):
         self.return_value = return_value
+        self.result = return_value
+        self.on_transact = on_transact
 
     def transact(self, value=0):
+        if self.on_transact and value is not None:
+            self.on_transact(value)
         return self.return_value
 
     def __int__(self):
@@ -131,10 +135,31 @@ class _MockSimContract:
             sim_client.accounts[2].lower(): "LAB-ACCREDITED-03",
         }
         self.claimable_balances = {}
+        self.failing_transfer_recipients = set()
+        self.simulated_transfers = []
+
+    def simulate_transfer_failure(self, recipient):
+        self.failing_transfer_recipients.add(str(recipient).lower())
 
     def _safe_transfer(self, recipient, amount):
-        if int(amount) <= 0:
+        amt = int(amount)
+        if amt <= 0:
             return True
+        recip_str = str(recipient).lower()
+        if recip_str in self.failing_transfer_recipients:
+            curr = self.claimable_balances.get(recip_str, 0)
+            self.claimable_balances[recip_str] = curr + amt
+            self.simulated_transfers.append({
+                "recipient": recip_str,
+                "amount": amt,
+                "success": False
+            })
+            return False
+        self.simulated_transfers.append({
+            "recipient": recip_str,
+            "amount": amt,
+            "success": True
+        })
         return True
 
     def connect(self, account):
@@ -239,7 +264,12 @@ class _MockSimContract:
             "appeal_certifying_lab": "0x0000000000000000000000000000000000000000",
             "supplemental_evidence_hash": "",
         }
-        return _MockTxResult(oid)
+
+        def _set_escrow(v):
+            if v > 0:
+                self.orders[oid]["escrow_amount"] = str(v)
+
+        return _MockTxResult(oid, on_transact=_set_escrow)
 
     def order_synthesis_designated(self, args, value=0):
         return self.order_synthesis(args, value=value)
@@ -392,7 +422,12 @@ class _MockSimContract:
         self.orders[oid]["dispute_initiator"] = self.caller
         self.orders[oid]["appeal_certifying_lab"] = str(cert_lab)
         self.orders[oid]["supplemental_evidence_hash"] = clean_supp
-        return _MockTxResult(None)
+
+        def _set_bond(v):
+            if v > 0:
+                self.orders[oid]["dispute_bond"] = str(v)
+
+        return _MockTxResult(None, on_transact=_set_bond)
 
     def adjudicate_appeal(self, args):
         oid = args[0]
@@ -523,9 +558,13 @@ class _MockSimContract:
         else:
             raise ValueError(f"Order cannot be cancelled in status {o['status']}.")
 
+        escrow_val = int(o.get("escrow_amount", 0))
+        o["escrow_amount"] = "0"
         o["status"] = 6  # CANCELLED
         o["verdict"] = "CANCELLED"
         o["reason"] = "Bio order expired and escrow reclaimed by researcher."
+        if escrow_val > 0:
+            self._safe_transfer(o["researcher"], escrow_val)
         return _MockTxResult(None)
 
     def recover_disputed_order(self, args):
@@ -542,13 +581,20 @@ class _MockSimContract:
         o = self.orders[oid]
         if o["status"] != 2:
             raise ValueError("Bio order is not awaiting settlement payout.")
+        escrow_val = int(o.get("escrow_amount", 0))
         o["escrow_amount"] = "0"  # Zero out to prevent duplicate payouts
         if o["verdict"] == "BIO_SYNTHESIS_VERIFIED":
             o["status"] = 3  # STATUS_VERIFIED_PAID
+            if escrow_val > 0:
+                self._safe_transfer(o["foundry"], escrow_val)
         elif o["verdict"] == "BIOHAZARD_BLOCKED":
             o["status"] = 4  # STATUS_BIOHAZARD_SLASHED
+            if escrow_val > 0:
+                self._safe_transfer(self.biosecurity_reserve, escrow_val)
         else:
             o["status"] = 5  # STATUS_DEFECTIVE_REFUNDED
+            if escrow_val > 0:
+                self._safe_transfer(o["researcher"], escrow_val)
         return _MockTxResult(None)
 
     def verify_order_agreement(self, args):

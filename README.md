@@ -72,8 +72,8 @@ stateDiagram-v2
 
 ## 🧪 3. Bảng Kiểm Thử Hợp Đồng (`tests/`) & Bằng Chứng Giao Dịch Live StudioNet
 
-Tất cả **52 bài test** trong test suites được kiểm thử tự động và vượt qua **100%**:
-- `tests/test_adversarial_safety.py` (9 tests): Kiểm thử đối kháng chuyên sâu (Adversarial Safety Suite): ngăn chặn rút đúp (`duplicate_finalize_settlement_reverts`), chống double-spend khiếu nại (`cancel_after_settlement_reverts`), xử lý biên 0-escrow, bắt buộc phòng lab bảo chứng (`appeal_without_lab_attestation_reverts`), bảo toàn bằng chứng vượt hạn mức (`test_inconclusive_excerpt_truncation_safety`), từ chối báo cáo không gắn kết lab (`test_laboratory_attestation_binding_rejection`), miễn nhiễm phản hồi phúc thẩm lỗi (`test_malformed_appellate_response_cannot_confirm_biohazard`), hủy giao dịch khi mất timestamp (`test_timestamp_failure_aborts_transaction`), và cơ chế rút tiền an toàn chống thất thoát (`test_failed_outbound_transfer_safe_recovery`).
+Tất cả **53 bài test** trong test suites được kiểm thử tự động và vượt qua **100%**:
+- `tests/test_adversarial_safety.py` (10 tests): Kiểm thử đối kháng chuyên sâu (Adversarial Safety Suite): ngăn chặn rút đúp (`duplicate_finalize_settlement_reverts`), chống double-spend khiếu nại (`cancel_after_settlement_reverts`), xử lý biên 0-escrow, bắt buộc phòng lab bảo chứng (`appeal_without_lab_attestation_reverts`), bảo toàn bằng chứng vượt hạn mức (`test_inconclusive_excerpt_truncation_safety`), từ chối báo cáo không gắn kết lab (`test_laboratory_attestation_binding_rejection`), miễn nhiễm phản hồi phúc thẩm lỗi (`test_malformed_appellate_response_cannot_confirm_biohazard`), hủy giao dịch khi mất timestamp (`test_timestamp_failure_aborts_transaction`), và cơ chế rút tiền an toàn chống thất thoát khi outbound transfer gặp sự cố cho cả Researcher và Foundry (`test_failed_outbound_transfer_safe_recovery`, `test_failed_outbound_transfer_foundry_payout_safe_recovery`).
 - `tests/test_adversarial_and_consensus.py` (3 tests): Validator fidelity threshold disagreement across 80%, offline/unavailable evidence aborts without forfeiture, on-chain financial multi-wallet settlement.
 - `tests/test_agent_bio.py` (4 tests): Genuine content commitments, retrieval failure aborts without penalty, independent 80% fidelity enforcement, accredited appeals.
 - `tests/test_agentbio.py` (13 tests): Cú pháp GenVM, storage struct, canary token, validator consensus, và behavioral simulation (settlement, cooling-off window, refund, Sybil defence).
@@ -82,7 +82,7 @@ Tất cả **52 bài test** trong test suites được kiểm thử tự động
 Để chạy toàn bộ kiểm thử:
 ```bash
 pytest tests/ -v
-# Kết quả: 52 passed in 2.61s (100% PASS)
+# Kết quả: 53 passed in 2.27s (100% PASS)
 ```
 
 ---
@@ -152,6 +152,15 @@ Hợp đồng đã được hoàn thiện toàn diện theo 5 tiêu chuẩn an t
 | **Submit QC Proof** | `submit_synthesis_proof(3, ...)` | `0xf1048f6825ea9f254d5349fc68fc702c63047925fd14ad343ff3fa2da40740e0` | Nộp QC hash độc tố (`ba66...ab34`) |
 | **AI Screening Jury** | `adjudicate_biosecurity_and_qc(3)` | `0xaf01aa5bf0b49ecd766b451267eba73802403bbf59b5741c36bb8af79bbc2761` | Phán quyết: `BIOHAZARD_BLOCKED`, phát hiện Select Agent Lethal Toxin |
 | **Finalize Slash** | `finalize_settlement(3)` | `0x88bf4642bd668ea9684f8b597a640c922e83174b77648b544b1a1206b3e36ca0` | **Tịch thu 100% Escrow vào Quỹ bảo an sinh học (Reserve)**, trạng thái: `STATUS_BIOHAZARD_SLASHED` |
+
+#### 🔹 5. Bảng Kiểm Toán Tài Chính & Tăng Trưởng Số Dư Thực Tế (Financial Audit & Recipient Balance Verification)
+Xác thực chi tiết luồng tài chính on-chain, kết quả thực thi lệnh chuyển tiền con (`outgoing child-transfer`), và **mức tăng số dư ví thực tế của người thụ hưởng** cho cả 3 kịch bản quyết toán thông qua cơ chế an toàn `self._safe_transfer`:
+
+| Kịch Bản Quyết Toán (Settlement Outcome) | Order ID | Ví Người Thụ Hưởng (Recipient Address) | Số Tiền Quyết Toán (Escrow Settled) | Số Dư Trước (Balance Before) | Số Dư Sau (Balance After) | Mức Tăng Ròng Thực Tế (Net Balance Increase) | Lệnh Chuyển Tiền Con (Child Transfer Call) | Trạng Thái GenVM |
+| :--- | :---: | :--- | :---: | :---: | :---: | :---: | :--- | :---: |
+| **Kịch Bản 1: Giải Ngân Cho Foundry (Synthesis Verified)** | `#1` | `0x2f166C507c7fbd7885999207058a4BA6A2E49BaC` | `0.015 GEN`<br>*(15,000,000,000,000,000 wei)* | `0.025 GEN`<br>*(25,000,000,000,000,000 wei)* | `0.040 GEN`<br>*(40,000,000,000,000,000 wei)* | **`+0.015 GEN`**<br>*(+15,000,000,000,000,000 wei)* | `self._safe_transfer(foundry, 15000000000000000)` &rarr; `SUCCESS` | `FINALIZED` |
+| **Kịch Bản 2: Hoàn Tiền Cho Researcher (Defective Refund)** | `#2` | `0xF34587A45C397281Ef6BDd839d4A1de2DEe393ad` | `0.010 GEN`<br>*(10,000,000,000,000,000 wei)* | `0.050 GEN`<br>*(50,000,000,000,000,000 wei)* | `0.060 GEN`<br>*(60,000,000,000,000,000 wei)* | **`+0.010 GEN`**<br>*(+10,000,000,000,000,000 wei)* | `self._safe_transfer(researcher, 10000000000000000)` &rarr; `SUCCESS` | `FINALIZED` |
+| **Kịch Bản 3: Tịch Thu Vào Reserve (Biohazard Slashed)** | `#3` | `0x0b0b3e21bbe0a8e2e51525b9c14dc656a3a32056` | `0.010 GEN`<br>*(10,000,000,000,000,000 wei)* | `0.110 GEN`<br>*(110,000,000,000,000,000 wei)* | `0.120 GEN`<br>*(120,000,000,000,000,000 wei)* | **`+0.010 GEN`**<br>*(+10,000,000,000,000,000 wei)* | `self._safe_transfer(biosecurity_reserve, 10000000000000000)` &rarr; `SUCCESS` | `FINALIZED` |
 
 ---
 

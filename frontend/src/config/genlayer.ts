@@ -438,6 +438,30 @@ export async function adjudicateBiosecurityOnChain(
 }
 
 /**
+ * Accredited laboratory binds supplemental forensic evidence to an order
+ */
+export async function attestAppealEvidenceOnChain(
+  contractAddress: string,
+  userAddress: string,
+  orderId: number,
+  evidenceHash: string
+): Promise<string> {
+  await ensureStudionet();
+  const client = getGenLayerClient(userAddress);
+
+  const cleanHash = evidenceHash.trim().toLowerCase();
+  const txHash = await (client.writeContract as any)({
+    address: contractAddress as `0x${string}`,
+    functionName: 'attest_appeal_evidence',
+    args: [orderId, cleanHash],
+    value: 0n,
+  });
+
+  await client.waitForTransactionReceipt({ hash: txHash });
+  return txHash;
+}
+
+/**
  * Appeal verdict during cooling-off window with 10% bond
  */
 export async function appealVerdictOnChain(
@@ -446,14 +470,14 @@ export async function appealVerdictOnChain(
   orderId: number,
   disputeReason: string,
   bondWei: bigint,
-  certifyingLab?: string,
-  supplementalEvidenceHash?: string
+  certifyingLab: string,
+  supplementalEvidenceHash: string
 ): Promise<string> {
   await ensureStudionet();
   const client = getGenLayerClient(userAddress);
 
-  const effectiveLab = certifyingLab || '0xF34587A45C397281Ef6BDd839d4A1de2DEe393ad';
-  const cleanSuppHash = supplementalEvidenceHash?.trim().toLowerCase() || '0'.repeat(64);
+  const effectiveLab = certifyingLab.trim();
+  const cleanSuppHash = supplementalEvidenceHash.trim().toLowerCase();
 
   const txHash = await (client.writeContract as any)({
     address: contractAddress as `0x${string}`,
